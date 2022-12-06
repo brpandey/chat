@@ -42,7 +42,7 @@ impl ClientData {
 async fn main() -> io::Result<()> {
     fmt()
         .compact()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .init();
 
     info!("Server starting.. {:?}", &SERVER);
@@ -157,7 +157,7 @@ async fn main() -> io::Result<()> {
             }
             Some((cid, msg)) = local_rx.recv() => {
                 // Read data received from server and broadcast to all clients
-                debug!("Local channel msg received {:?}", &msg);
+                debug!("Local channel msg received {:?}", std::str::from_utf8(&msg).unwrap());
 
                 // grab names from chat names which is behind a RWLock
 
