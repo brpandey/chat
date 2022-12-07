@@ -8,6 +8,9 @@ use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener};//, tcp};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
+use tokio_util::codec::{FramedRead, LinesCodec};
+use tokio_stream::StreamExt;
+
 use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
 
@@ -15,8 +18,8 @@ const SERVER: &str = "127.0.0.1:4321";
 const ALL_CLIENTS: usize = 0;
 
 const CURRENT_USERS_MSG: &str = "Current users online are: ";
-const USER_JOINED: &str = "User {} joined";
-const USER_LEFT: &str = "User {} has left";
+const USER_JOINED: &str = "User {} joined\n";
+const USER_LEFT: &str = "User {} has left\n";
 
 // type TcpWrite = tcp::OwnedWriteHalf;
 
@@ -42,7 +45,7 @@ impl ClientData {
 async fn main() -> io::Result<()> {
     fmt()
         .compact()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::INFO)
         .init();
 
     info!("Server starting.. {:?}", &SERVER);
@@ -109,48 +112,55 @@ async fn main() -> io::Result<()> {
                 msg_prefix.push(b':');
                 msg_prefix.push(b' ');
 
+                let mut fr = FramedRead::new(tcp_read, LinesCodec::new_with_max_length(256));
+
                 // Spawn tokio task to handle server socket reads
                 tokio::spawn(async move {
                     loop {
-                        let mut buf = vec![0; 64];
+                        // Read lines from server
+                        if let Some(value) = fr.next().await {
+                            debug!("server waka waka! value is : {:?}", value);
 
-                        // Read msg from server socket connection
-                        // Fire off to channel, keeping read loop tight
-                        match tcp_read.read(&mut buf).await {
-                            Ok(0) => { // 0 signifies remote has closed
-                                let mut remove_name = vec![];
-                                {
-                                    let mut sc = clients_ref.lock().await;
-                                    if let Some((addr, name, _w)) = sc.remove(&client_id) {
-                                        info!("Remote {:?} has closed connection", &addr);
-                                        info!("User {} has left", std::str::from_utf8(&name).unwrap());
-                                        remove_name = name;
+                            match value {
+                                Ok(line) if line.len() > 0 => {
+                                    debug!("Server received client msg, un-truncated: {:?}", line);
 
-                                        // broadcast that user has left
-                                        let leave_msg = USER_LEFT.replace("{}", &std::str::from_utf8(&remove_name).unwrap());
-                                        task_tx.send((client_id, leave_msg.into_bytes())).await.expect("Unable to tx");
-                                    }
-                                }
+                                    let mut msg: Vec<u8> = Vec::with_capacity(msg_prefix.len() + line.len() + 1);
+                                    let mut p = msg_prefix.clone();
+                                    let mut line2 = line.into_bytes();
+                                    msg.append(&mut p);
+                                    msg.append(&mut line2);
+                                    msg.push(b'\n');
 
-                                chat_names_ref.write().await.remove(&remove_name);
+                                    debug!("Server received client msg {:?}", &msg);
+                                    // delegate the broadcast of msg echoing to another block
+                                    task_tx.send((client_id, msg)).await.expect("Unable to tx");
 
-                                break;
-                            },
-                            Ok(n) => {
-                                buf.truncate(n);
-                                let mut msg: Vec<u8> = Vec::with_capacity(msg_prefix.len() + buf.len());
-                                let mut p = msg_prefix.clone();
-                                msg.append(&mut p);
-                                msg.append(&mut buf);
-
-                                debug!("Server received client msg {:?}", std::str::from_utf8(&msg).unwrap());
-                                // delegate the broadcast of msg echoing to another block
-                                task_tx.send((client_id, msg)).await.expect("Unable to tx");
-                            },
-                            Err(_) => {
-                                debug!("Server connection closing");
-                                return;
+                                },
+                                Ok(_) => continue,
+                                Err(x) => {
+                                    debug!("Server Connection closing error: {:?}", x);
+                                    break;
+                                },
                             }
+                        } else {
+                            info!("Client has closed");
+                            let mut remove_name = vec![];
+                            {
+                                let mut sc = clients_ref.lock().await;
+                                if let Some((addr, name, _w)) = sc.remove(&client_id) {
+                                    info!("Remote {:?} has closed connection", &addr);
+                                    info!("User {} has left", std::str::from_utf8(&name).unwrap());
+                                    remove_name = name;
+
+                                    // broadcast that user has left
+                                    let leave_msg = USER_LEFT.replace("{}", &std::str::from_utf8(&remove_name).unwrap());
+                                    task_tx.send((client_id, leave_msg.into_bytes())).await.expect("Unable to tx");
+                                }
+                            }
+
+                            chat_names_ref.write().await.remove(&remove_name);
+                            break;
                         }
                     }
                 });
@@ -160,7 +170,6 @@ async fn main() -> io::Result<()> {
                 debug!("Local channel msg received {:?}", std::str::from_utf8(&msg).unwrap());
 
                 // grab names from chat names which is behind a RWLock
-
                 let mut users_online: Vec<u8> = vec![];
 
                 if cid == ALL_CLIENTS {
@@ -190,6 +199,8 @@ async fn main() -> io::Result<()> {
                     for (k, (_addr, _name, ws)) in sc.iter_mut() {
                         // sendto (k) is different than the client id (cid) that sent message
                         // then only send
+
+                        debug!("About to write to server tcp_socket, msg {:?}", std::str::from_utf8(&msg).unwrap());
 
                         if cid == ALL_CLIENTS {
                             ws.write_all(&users_online).await.expect("Unable to write to tcp socket");
