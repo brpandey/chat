@@ -5,6 +5,7 @@ use std::io::{stdout, Write};
 // use std::sync::atomic::{AtomicBool}, Ordering};
 // use std::sync::Arc;
 
+use tokio::select;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::io::{self, AsyncWriteExt}; //, AsyncReadExt};
@@ -18,6 +19,7 @@ use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
 
 const SERVER: &str = "127.0.0.1:4321";
+const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\private chatname\n$ Please input chat name: ";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -38,7 +40,7 @@ async fn main() -> io::Result<()> {
     let (client_read, mut client_write) = client.into_split();
     let (local_tx, mut local_rx) = mpsc::channel::<Vec<u8>>(64);
 
-    if let Ok(Some(msg)) = read_sync_user_input("$ Welcome to chat! \n$ Commands (\\quit, \\private user_name). \n$ Please input chat name: ") {
+    if let Ok(Some(msg)) = read_sync_user_input(GREETINGS) {
         client_write.write_all(&msg).await.expect("Unable to write to server");
     } else {
         error!("Unable to retrieve user chat name");
@@ -113,7 +115,7 @@ async fn main() -> io::Result<()> {
     });
 
     // Note: use try_join() and all the tasks should be async functions
-    tokio::select! {
+    select! {
         _ = server_read_handle => {
             println!("X");
         }
@@ -145,9 +147,15 @@ async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
 
     if let Some(Ok(line)) = fr.next().await {
+
         if line == "\\quit" {
             info!("Session terminated by user...");
             return Ok(None);
+        }
+
+        if line == "\\users" {
+            let res = line.strip_prefix("\\").unwrap().as_bytes().to_vec();
+            return Ok(Some(res))
         }
 
         let mut total = vec![];
