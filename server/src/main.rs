@@ -19,6 +19,10 @@ use server::delivery::Delivery;
 
 const SERVER: &str = "127.0.0.1:4321";
 
+const COUNTER_SEED: usize = 1;
+const LINES_MAX_LEN: usize = 256;
+const BOUNDED_CHANNEL_SIZE: usize = 64;
+
 const CURRENT_USERS_MSG: &str = "Current users online are: ";
 const USER_JOINED: &str = "User {} joined\n";
 const USER_LEFT: &str = "User {} has left\n";
@@ -54,15 +58,16 @@ async fn main() -> io::Result<()> {
     // clone tx end of local channel
 
     let clients: Registry = Arc::new(Mutex::new(HashMap::new()));
-    let mut delivery = Delivery::new(&clients);
+    let mut outgoing = Delivery::new(&clients);
 
     let chat_names1 = Arc::new(RwLock::new(HashSet::new()));
     let chat_names2 = Arc::clone(&chat_names1);
 
-    let (local_tx, mut local_rx) = mpsc::channel::<MsgType>(64);
-    let counter = Arc::new(AtomicUsize::new(1));
+    let (local_tx, mut local_rx) = mpsc::channel::<MsgType>(BOUNDED_CHANNEL_SIZE);
     let task_tx1 = local_tx.clone(); // clone before spawn
     let task_tx2 = local_tx.clone(); // clone before spawn
+
+    let counter = Arc::new(AtomicUsize::new(COUNTER_SEED));
 
     // Loop to handle either
     // 1) async listening for new clients, or
@@ -74,8 +79,7 @@ async fn main() -> io::Result<()> {
 
                 info!("Server received new client connection {:?}", &addr);
 
-                let client_id;
-                let client_msg;
+                let (client_id, client_msg);
 
                 // Wait for chat name msg
                 let mut name_buf: Vec<u8> = vec![0; 64];
@@ -116,7 +120,7 @@ async fn main() -> io::Result<()> {
                 msg_prefix.push(b':');
                 msg_prefix.push(b' ');
 
-                let mut fr = FramedRead::new(tcp_read, LinesCodec::new_with_max_length(256));
+                let mut fr = FramedRead::new(tcp_read, LinesCodec::new_with_max_length(LINES_MAX_LEN));
 
                 // Spawn tokio task to handle server socket reads
                 tokio::spawn(async move {
@@ -175,43 +179,27 @@ async fn main() -> io::Result<()> {
                     }
                 });
             }
-            Some(outgoing) = local_rx.recv() => {
+            Some(message) = local_rx.recv() => {
                 // Read data received from server and broadcast to all clients
-                debug!("Local channel msg received {:?}", &outgoing);
+                debug!("Local channel msg received {:?}", &message);
 
                 let chat_names_ref2 = Arc::clone(&chat_names2);
 
-
-//                let clients_ref2 = Arc::clone(&clients2);
-
-                match outgoing {
+                match message {
                     MsgType::Joined(cid, msg) => {
-                        //broadcast join msg to all except for cid
-
-                        //broadcast_except(clients_ref2, msg, cid).await;
-                        delivery.broadcast_except(msg, cid).await;
-
+                        //broadcast join msg to all except for cid, then
                         // trigger 'current users' message as well for cid
-                        // send tx message for MsgType::Users...
+                        outgoing.broadcast_except(msg, cid).await;
                         task_tx2.send(MsgType::Users(cid)).await.expect("Unable to tx");
                     },
-                    MsgType::MessageSingle(cid, msg) => {
-                        //single tcp write send
-
-                        //send(clients_ref2, cid, msg).await;
-                        delivery.send(cid, msg).await;
+                    MsgType::MessageSingle(cid, msg) => {//single send to single client
+                        outgoing.send(cid, msg).await;
                     },
-                    MsgType::Message(cid, msg) => {
-                        //broadcast to all except for cid
-
-                        //broadcast_except(clients_ref2, msg, cid).await;
-                        delivery.broadcast_except(msg, cid).await;
+                    MsgType::Message(cid, msg) => { //broadcast to all except for cid
+                        outgoing.broadcast_except(msg, cid).await;
                     },
-                    MsgType::Exited(msg) => {
-                        //broadcast to everyone
-
-                        //broadcast(clients_ref2, msg).await;
-                        delivery.broadcast(msg).await;
+                    MsgType::Exited(msg) => { //broadcast to all
+                        outgoing.broadcast(msg).await;
                     },
                     MsgType::Users(cid) => {
                         let users_msg = get_names(chat_names_ref2).await;

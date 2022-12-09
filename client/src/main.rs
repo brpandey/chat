@@ -19,7 +19,7 @@ use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
 
 const SERVER: &str = "127.0.0.1:4321";
-const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\private chatname\n$ Please input chat name: ";
+const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -145,15 +145,17 @@ async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
 
     if let Some(Ok(line)) = fr.next().await {
-
-        if line == "\\quit" {
-            info!("Session terminated by user...");
-            return Ok(None);
-        }
-
-        if line == "\\users" {
-            let res = line.strip_prefix("\\").unwrap().as_bytes().to_vec();
-            return Ok(Some(res))
+        // handle if any commands present
+        match line.as_str() {
+            "\\quit" => {
+                info!("Session terminated by user...");
+                return Ok(None);
+            },
+            "\\users" => {
+                let res = line.strip_prefix("\\").unwrap().as_bytes().to_vec();
+                return Ok(Some(res))
+            },
+            _ => (),
         }
 
         let mut total = vec![];
