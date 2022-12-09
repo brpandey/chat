@@ -73,10 +73,8 @@ async fn main() -> io::Result<()> {
                 break;
             }
         }
-
 //        server_alive_ref1.swap(false, Ordering::Relaxed);
     });
-
 
     let mut fw = FramedWrite::new(client_write, LinesCodec::new());
 

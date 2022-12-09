@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::net::SocketAddr;
+//use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::select;
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, tcp};
+use tokio::io::{self, AsyncReadExt};
+use tokio::net::{TcpListener}; //, tcp};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use tokio_util::codec::{FramedRead, LinesCodec};
@@ -14,8 +14,10 @@ use tokio_stream::StreamExt;
 use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
 
+use server::server::Registry;
+use server::delivery::Delivery;
+
 const SERVER: &str = "127.0.0.1:4321";
-const ALL_CLIENTS: usize = 0;
 
 const CURRENT_USERS_MSG: &str = "Current users online are: ";
 const USER_JOINED: &str = "User {} joined\n";
@@ -29,10 +31,6 @@ pub enum MsgType {
     Exited(Vec<u8>),
     Users(usize),
 }
-
-// current client registry data
-type Registry = Arc<Mutex<HashMap<usize, RegistryEntry>>>;
-type RegistryEntry = (SocketAddr, Vec<u8>, tcp::OwnedWriteHalf);
 
 //current chat names
 type Names = Arc<RwLock<HashSet<Vec<u8>>>>;
@@ -48,14 +46,15 @@ async fn main() -> io::Result<()> {
 
     let listener = TcpListener::bind(SERVER).await.expect("Unable to bind to server address");
 
-    // Setup map, allow it to be shared across tasks, which may be passed along threads
-    // Setup hashset of names, allow it to be shared across tasks...
+    // Setup registry map, allow it to be shared across tasks, which may be passed along threads
+    // Setup names hashset, allow it to be shared across tasks...
+
     // Setup local msg passing channel
     // Set up unique counter
     // clone tx end of local channel
 
-    let clients1 = Arc::new(Mutex::new(HashMap::new()));
-    let clients2 = Arc::clone(&clients1);
+    let clients: Registry = Arc::new(Mutex::new(HashMap::new()));
+    let mut delivery = Delivery::new(&clients);
 
     let chat_names1 = Arc::new(RwLock::new(HashSet::new()));
     let chat_names2 = Arc::clone(&chat_names1);
@@ -97,7 +96,7 @@ async fn main() -> io::Result<()> {
                 // Need to wrap in Arc/Mutex since it is shared out to 
                 // both tokio tasks
                 {
-                    let mut sc = clients1.lock().await;
+                    let mut sc = clients.lock().await;
                     sc.entry(client_id).or_insert((addr.clone(), name_buf.clone(), tcp_write));
                 }
 
@@ -108,7 +107,7 @@ async fn main() -> io::Result<()> {
                 task_tx1.send(client_msg).await.expect("Unable to tx");
 
                 let task_tx_ref = task_tx1.clone();
-                let clients_ref = Arc::clone(&clients1);
+                let clients_ref = Arc::clone(&clients);
                 let chat_names_ref = Arc::clone(&chat_names1);
 
                 // Generate per client msg prefix, e.g. "name: "
@@ -181,12 +180,16 @@ async fn main() -> io::Result<()> {
                 debug!("Local channel msg received {:?}", &outgoing);
 
                 let chat_names_ref2 = Arc::clone(&chat_names2);
-                let clients_ref2 = Arc::clone(&clients2);
+
+
+//                let clients_ref2 = Arc::clone(&clients2);
 
                 match outgoing {
                     MsgType::Joined(cid, msg) => {
                         //broadcast join msg to all except for cid
-                        broadcast_except(clients_ref2, msg, cid).await;
+
+                        //broadcast_except(clients_ref2, msg, cid).await;
+                        delivery.broadcast_except(msg, cid).await;
 
                         // trigger 'current users' message as well for cid
                         // send tx message for MsgType::Users...
@@ -194,15 +197,21 @@ async fn main() -> io::Result<()> {
                     },
                     MsgType::MessageSingle(cid, msg) => {
                         //single tcp write send
-                        send(clients_ref2, cid, msg).await;
+
+                        //send(clients_ref2, cid, msg).await;
+                        delivery.send(cid, msg).await;
                     },
                     MsgType::Message(cid, msg) => {
                         //broadcast to all except for cid
-                        broadcast_except(clients_ref2, msg, cid).await;
+
+                        //broadcast_except(clients_ref2, msg, cid).await;
+                        delivery.broadcast_except(msg, cid).await;
                     },
                     MsgType::Exited(msg) => {
                         //broadcast to everyone
-                        broadcast(clients_ref2, msg).await;
+
+                        //broadcast(clients_ref2, msg).await;
+                        delivery.broadcast(msg).await;
                     },
                     MsgType::Users(cid) => {
                         let users_msg = get_names(chat_names_ref2).await;
@@ -215,38 +224,6 @@ async fn main() -> io::Result<()> {
     }
 }
 
-// todo: function should go into an impl block for a type e.g. Registry
-async fn send(registry: Registry, cid: usize, msg: Vec<u8>) {
-    let mut r = registry.lock().await;
-
-    if let Some((_addr, _name, ws)) = r.get_mut(&cid) {
-        ws.write_all(&msg).await.expect("unable to write");
-    }
-}
-
-async fn broadcast(registry: Registry, msg: Vec<u8>) {
-    broadcast_except(registry, msg, ALL_CLIENTS).await;
-}
-
-async fn broadcast_except(registry: Registry, msg: Vec<u8>, except: usize) {
-    // broadcast to client tcp_write sockets stored in clients which is behind a Mutex
-    {
-        let mut r = registry.lock().await;
-
-        // broadcast, ws or write_socket needs to mutable
-        for (k, (_addr, _name, ws)) in r.iter_mut() {
-            // sendto (k) is different than the client id (cid) that sent message
-            // then only send
-
-            debug!("About to write to server tcp_socket, msg {:?}", std::str::from_utf8(&msg).unwrap());
-
-            if except == *k { continue } // skip the send to except client id
-
-            let err = format!("Unable to write to tcp socket {:?}", k); // debug
-            ws.write_all(&msg).await.expect(&err);
-        }
-    }
-}
 
 // todo: function should go into an impl block for a type e.g. Names
 async fn get_names(chat_names: Names) -> Vec<u8> {
