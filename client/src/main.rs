@@ -1,5 +1,4 @@
 use std::io as stdio;
-
 use std::io::{stdout, Write};
 
 // use std::sync::atomic::{AtomicBool}, Ordering};
@@ -83,7 +82,6 @@ async fn main() -> io::Result<()> {
         loop {
             // Read from channel, data received from command line
             if let Some(msg) = local_rx.recv().await {
-                debug!("Sent msg {:?}, to client write tcp socket", std::str::from_utf8(&msg));
                 let m = std::str::from_utf8(&msg).unwrap();
                 fw.send(m).await.expect("Unable to write to server");
             }
@@ -95,7 +93,6 @@ async fn main() -> io::Result<()> {
         loop {
             debug!("task C: cmd line input looping");
             if let Ok(Some(msg)) = read_async_user_input().await {
-                debug!("about to send cmd line msg {:?} to local channel", &msg);
                 local_tx.send(msg).await.expect("xxx Unable to tx");
             } else {
                 break;
@@ -139,7 +136,6 @@ fn read_sync_user_input(prompt: &str) -> io::Result<Option<Vec<u8>>> {
 
     Ok(Some(trimmed.as_bytes().to_vec()))
 }
-
 
 async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
