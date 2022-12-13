@@ -1,16 +1,14 @@
 use std::collections::HashMap;
-use std::time::Duration;
 use std::sync::Arc;
-//use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize};
 
 use tokio::select;
-use tokio::io::{self, AsyncReadExt};
+use tokio::io;
 use tokio::net::TcpListener; //, tcp};
 use tokio::sync::{mpsc, Mutex};
 
 use tracing_subscriber::fmt;
-use tracing::{info, error, Level};
+use tracing::{info, Level};
 
 use server::server::Registry;
 use server::delivery::Delivery;
@@ -23,8 +21,6 @@ const SERVER: &str = "127.0.0.1:4321";
 const COUNTER_SEED: usize = 1;
 const BOUNDED_CHANNEL_SIZE: usize = 64;
 
-const USER_JOINED: &str = "User {} joined\n";
-const USER_JOINED_ACK: &str = "You have successfully joined as {} \n";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -63,68 +59,14 @@ async fn main() -> io::Result<()> {
     loop {
         select! {
             Ok((tcp_socket, addr)) = listener.accept() => {
-                let (mut tcp_read, tcp_write) = tcp_socket.into_split();
+                let (tcp_read, tcp_write) = tcp_socket.into_split();
 
                 info!("Server received new client connection {:?}", &addr);
 
-                let (client_id, mut client_msg);
+                let reader = ClientReader::new(tcp_read, task_tx1.clone(),
+                                               Arc::clone(&clients), chat_names1.clone());
 
-                // Wait for chat name msg
-                let mut name_buf: Vec<u8> = vec![0; 64];
-                let mut name: String;
-
-                if let Ok(n) = tcp_read.read(&mut name_buf).await {
-                    name_buf.truncate(n);
-                    name = String::from_utf8(name_buf.clone()).unwrap();
-                    client_id = counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
-
-                    info!("client_id is {}", client_id);
-                } else {
-                    error!("Unable to retrieve chat user name");
-                    return Ok(());
-                }
-
-                // Acquire write lock guard, insert new chat name, using new name if there was a collision
-                {
-                    let mut lg = chat_names1.write().await;
-                    if !lg.insert(name.clone()) { // if collision happened, grab modified handle name
-                        name = lg.last_collision().unwrap(); // retrieve updated name, has to be not None
-
-                        // send msg back acknowledging user joined with updated chat name
-                        let join_msg = USER_JOINED_ACK.replace("{}", &name);
-                        client_msg = MsgType::JoinedAck(client_id, join_msg.into_bytes());
-
-                        // notify others of new join
-                        task_tx1.send_timeout(client_msg, Duration::from_millis(75)).await
-                            .expect("Unable to tx");
-                    }
-                }
-
-                // Store client data into clients registry
-                {
-                    let mut sc = clients.lock().await;
-                    sc.entry(client_id).or_insert((addr.clone(), name.clone(), tcp_write));
-                }
-
-                let join_msg = USER_JOINED.replace("{}", &name);
-                client_msg = MsgType::Joined(client_id, join_msg.into_bytes());
-
-                // notify others of new join
-                task_tx1.send_timeout(client_msg, Duration::from_millis(75)).await
-                    .expect("Unable to tx");
-
-
-                let mut nb = name.as_bytes().to_vec();
-                // Generate per client msg prefix, e.g. "name: "
-                let mut msg_prefix: Vec<u8> = Vec::with_capacity(nb.len() + 2);
-                msg_prefix.append(&mut nb);
-                msg_prefix.push(b':');
-                msg_prefix.push(b' ');
-
-                let reader = ClientReader::new(client_id, tcp_read, task_tx1.clone(),
-                                                   Arc::clone(&clients), chat_names1.clone(), msg_prefix);
-
-                ClientReader::spawn(reader);
+                ClientReader::spawn(reader, addr, tcp_write, Arc::clone(&counter));
             }
             Some(message) = local_rx.recv() => {
                 // Read data received from server and broadcast to all clients

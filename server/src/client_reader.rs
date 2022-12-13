@@ -1,22 +1,28 @@
-use tokio::net::tcp::OwnedReadHalf;
+use std::net::SocketAddr;
+use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use tokio::io::{self, Error, ErrorKind, AsyncReadExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, LinesCodec};
-//use tokio::io::{AsyncReadExt};
 use tokio_stream::StreamExt;
 
-use tracing::{info, debug};
+use tracing::{info, debug, error};
 
 use crate::server::MsgType;
 use crate::server::Registry;
 use crate::names::NamesShared;
 
 const LINES_MAX_LEN: usize = 256;
+
+const USER_JOINED: &str = "User {} joined\n";
+const USER_JOINED_ACK: &str = "You have successfully joined as {} \n";
 const USER_LEFT: &str = "User {} has left\n";
 
-
-
-
 // Handles server communication from client
+// Essentially this models a client reader actor
 pub struct ClientReader {
     client_id: usize,
     tcp_read: Option<OwnedReadHalf>,
@@ -28,55 +34,96 @@ pub struct ClientReader {
 
 impl ClientReader {
 
-    pub fn new(client_id: usize, tcp_read: OwnedReadHalf, task_tx: Sender<MsgType>, clients: Registry,
-               chat_names: NamesShared, msg_prefix: Vec<u8>) -> Self {
+    pub fn new(tcp_read: OwnedReadHalf, task_tx: Sender<MsgType>, clients: Registry,
+               chat_names: NamesShared) -> Self {
         Self {
-            client_id,
+            client_id: usize::MAX, // initialized after register()
             tcp_read: Some(tcp_read),
             task_tx,
             clients,
             chat_names,
-            msg_prefix,
+            msg_prefix: vec![], // initialized after register()
         }
     }
 
-/*
-    // register client properly
-    pub fn register(&mut self) {
-
-    }
-*/
-
     // Spawn tokio task to handle server socket reads from clients
-    pub fn spawn(mut client_reader: ClientReader) {
+    pub fn spawn(mut client_reader: ClientReader, addr: SocketAddr, tcp_write: OwnedWriteHalf, counter: Arc<AtomicUsize>) {
         let _h = tokio::spawn(async move {
-            client_reader.handle_read().await;
+            // if registration is successful then only handle client reads
+            if client_reader.register(addr, tcp_write, counter).await.is_ok() {
+                client_reader.handle_read().await;
+            }
         });
     }
 
+    // Register client properly: retrieving chat name,
+    // but also generate id, and store these data approrpriately
+    async fn register(&mut self, addr: SocketAddr, tcp_write: OwnedWriteHalf, counter: Arc<AtomicUsize>) -> io::Result<()> {
+        let mut client_msg: MsgType;
+        let mut name: String = self.read_name().await?;
 
-    async fn client_disconnected(&mut self) {
-        info!("Client connection has closed");
-        let mut remove_name = String::new();
-        let mut leave_msg = vec![];
-        { // keep lock scope - mutex guard - small
-            let mut mg = self.clients.lock().await;
-            if let Some((addr, name, _w)) = mg.remove(&self.client_id) {
-                info!("Remote {:?} has closed connection", &addr);
-                info!("User {} has left", &name);
-                leave_msg = USER_LEFT.replace("{}", &name)
-                    .into_bytes();
-                remove_name = name;
+        self.client_id = counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
+        info!("client_id is {}", self.client_id);
+
+        // Acquire write lock guard, insert new chat name, using new name if there was a collision
+        {
+            let mut lg = self.chat_names.write().await;
+            if !lg.insert(name.clone()) { // if collision happened, grab modified handle name
+                name = lg.last_collision().unwrap(); // retrieve updated name, has to be not None
+
+                // send msg back acknowledging user joined with updated chat name
+                let join_msg = USER_JOINED_ACK.replace("{}", &name);
+                client_msg = MsgType::JoinedAck(self.client_id, join_msg.into_bytes());
+
+                // notify others of new join
+                self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
+                    .expect("Unable to tx");
             }
         }
-        // keep names consistent to reflect client is gone
-        self.chat_names.write().await.remove(&remove_name);
 
-        // broadcast that user has left
-        self.task_tx.send(MsgType::Exited(leave_msg)).await
+        // Store client data into clients registry
+        {
+            let mut sc = self.clients.lock().await;
+            sc.entry(self.client_id).or_insert((addr.clone(), name.clone(), tcp_write));
+        }
+
+        let join_msg = USER_JOINED.replace("{}", &name);
+        client_msg = MsgType::Joined(self.client_id, join_msg.into_bytes());
+
+        // notify others of new join
+        self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
             .expect("Unable to tx");
+
+        self.set_msg_prompt(name.as_bytes().to_vec());
+
+        Ok(())
     }
 
+    async fn read_name(&mut self) -> io::Result<String> {
+        // Wait for chat name msg
+        let mut name_buf: Vec<u8> = vec![0; 64];
+        let name: String;
+
+        if let Ok(n) = self.tcp_read.as_mut().unwrap().read(&mut name_buf).await {
+            name_buf.truncate(n);
+            name = String::from_utf8(name_buf.clone()).unwrap();
+            return Ok(name)
+        } else {
+            error!("Unable to retrieve chat user name");
+            return Err(Error::new(ErrorKind::Other, "Unable to retrieve chat user name"));
+        }
+    }
+
+    fn set_msg_prompt(&mut self, mut bytes: Vec<u8>) {
+        // Generate per client msg prefix, e.g. "name: "
+        self.msg_prefix = Vec::with_capacity(bytes.len() + 2);
+        self.msg_prefix.append(&mut bytes);
+        self.msg_prefix.push(b':');
+        self.msg_prefix.push(b' ');
+    }
+
+
+    // Loop to handle ongoing client msgs to server
     async fn handle_read(&mut self) {
         let input = self.tcp_read.take().unwrap();
         let mut fr = FramedRead::new(input, LinesCodec::new_with_max_length(LINES_MAX_LEN));
@@ -109,9 +156,32 @@ impl ClientReader {
                     },
                 }
             } else {
-                self.client_disconnected().await;
+                self.process_disconnect().await;
                 break;
             }
         }
+    }
+
+    // process client disconnection event
+    async fn process_disconnect(&mut self) {
+        info!("Client connection has closed");
+        let mut remove_name = String::new();
+        let mut leave_msg = vec![];
+        { // keep lock scope - mutex guard - small
+            let mut mg = self.clients.lock().await;
+            if let Some((addr, name, _w)) = mg.remove(&self.client_id) {
+                info!("Remote {:?} has closed connection", &addr);
+                info!("User {} has left", &name);
+                leave_msg = USER_LEFT.replace("{}", &name)
+                    .into_bytes();
+                remove_name = name;
+            }
+        }
+        // keep names consistent to reflect client is gone
+        self.chat_names.write().await.remove(&remove_name);
+
+        // broadcast that user has left
+        self.task_tx.send(MsgType::Exited(leave_msg)).await
+            .expect("Unable to tx");
     }
 }
