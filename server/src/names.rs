@@ -12,6 +12,8 @@ pub struct NamesShared {
 }
 
 pub struct Names {
+    // Note: could replace String with BytesMut to optimize
+    // duplicate map insert could just clone unique's ByteMut to limit allocs
     unique: HashSet<String>,
     duplicates: HashMap<String, usize>,
     last_fixed: Option<String>,

@@ -9,35 +9,22 @@ use tokio::io::{self, AsyncReadExt};
 use tokio::net::TcpListener; //, tcp};
 use tokio::sync::{mpsc, Mutex};
 
-use tokio_util::codec::{FramedRead, LinesCodec};
-use tokio_stream::StreamExt;
-
 use tracing_subscriber::fmt;
-use tracing::{info, debug, error, Level};
+use tracing::{info, error, Level};
 
 use server::server::Registry;
 use server::delivery::Delivery;
 use server::names::NamesShared;
+use server::server::MsgType;
+use server::client_reader::ClientReader;
 
 const SERVER: &str = "127.0.0.1:4321";
 
 const COUNTER_SEED: usize = 1;
-const LINES_MAX_LEN: usize = 256;
 const BOUNDED_CHANNEL_SIZE: usize = 64;
 
 const USER_JOINED: &str = "User {} joined\n";
 const USER_JOINED_ACK: &str = "You have successfully joined as {} \n";
-const USER_LEFT: &str = "User {} has left\n";
-
-#[derive(Debug)]
-pub enum MsgType {
-    Joined(usize, Vec<u8>),
-    JoinedAck(usize, Vec<u8>),
-    Message(usize, Vec<u8>),
-    MessageSingle(usize, Vec<u8>),
-    Exited(Vec<u8>),
-    Users(usize),
-}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -126,9 +113,6 @@ async fn main() -> io::Result<()> {
                 task_tx1.send_timeout(client_msg, Duration::from_millis(75)).await
                     .expect("Unable to tx");
 
-                let task_tx_ref = task_tx1.clone();
-                let clients_ref = Arc::clone(&clients);
-                let chat_names_ref = chat_names1.clone();
 
                 let mut nb = name.as_bytes().to_vec();
                 // Generate per client msg prefix, e.g. "name: "
@@ -137,62 +121,10 @@ async fn main() -> io::Result<()> {
                 msg_prefix.push(b':');
                 msg_prefix.push(b' ');
 
-                let mut fr = FramedRead::new(tcp_read, LinesCodec::new_with_max_length(LINES_MAX_LEN));
+                let reader = ClientReader::new(client_id, tcp_read, task_tx1.clone(),
+                                                   Arc::clone(&clients), chat_names1.clone(), msg_prefix);
 
-                // Spawn tokio task to handle server socket reads
-                tokio::spawn(async move {
-                    loop {
-                        // Read lines from server
-                        if let Some(value) = fr.next().await {
-                            debug!("server received: {:?}", value);
-
-                            match value {
-                                Ok(line) if line == "users" => task_tx_ref.send(MsgType::Users(client_id)).await.expect("Unable to tx"),
-                                Ok(line) if line.len() > 0 => {
-                                    let mut msg: Vec<u8> = Vec::with_capacity(msg_prefix.len() + line.len() + 1);
-                                    let mut p = msg_prefix.clone();
-                                    let mut line2 = line.into_bytes();
-                                    msg.append(&mut p);
-                                    msg.append(&mut line2);
-                                    msg.push(b'\n');
-
-                                    debug!("Server received client msg {:?}", &msg);
-
-                                    // delegate the broadcast of msg echoing to another block
-                                    task_tx_ref.send(MsgType::Message(client_id, msg)).await
-                                        .expect("Unable to tx");
-                                },
-                                Ok(_) => continue,
-                                Err(x) => {
-                                    debug!("Server Connection closing error: {:?}", x);
-                                    break;
-                                },
-                            }
-                        } else {
-                            info!("Client connection has closed");
-                            let mut remove_name = String::new();
-                            let mut leave_msg = vec![];
-                            { // keep lock scope small
-                                let mut sc = clients_ref.lock().await;
-                                if let Some((addr, name, _w)) = sc.remove(&client_id) {
-                                    info!("Remote {:?} has closed connection", &addr);
-                                    info!("User {} has left", &name);
-                                    leave_msg = USER_LEFT.replace("{}", &name)
-                                        .into_bytes();
-                                    remove_name = name;
-                                }
-                            }
-                            // keep names consistent to reflect client is gone
-                            chat_names_ref.write().await.remove(&remove_name);
-
-                            // broadcast that user has left
-                            task_tx_ref.send(MsgType::Exited(leave_msg)).await
-                                .expect("Unable to tx");
-
-                            break;
-                        }
-                    }
-                });
+                ClientReader::spawn(reader);
             }
             Some(message) = local_rx.recv() => {
                 // Read data received from server and broadcast to all clients
