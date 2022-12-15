@@ -23,32 +23,24 @@ async fn main() -> io::Result<()> {
         .with_max_level(Level::INFO)
         .init();
 
-    // Setup registry map, allow it to be shared across tasks, which may be passed along threads
-    // share registry with Delivery
+    // Setup unique registry map and chat names,
+    // These are shareable across tasks which may be passed amongst threads
     let clients: Registry = Arc::new(Mutex::new(HashMap::new()));
     let outgoing = Delivery::new(&clients);
+    let chat_names: NamesShared = NamesShared::new();
 
-    // Setup two shared copies of a set of unique chat names
-    // which are shared across tokio tasks
-    let chat_names1: NamesShared = NamesShared::new();
-    let chat_names2: NamesShared = chat_names1.clone();
-
-    // Setup local msg passing channel
-    // clone tx end of local channel
-
+    // Setup server local msg passing channel
     let (local_tx, local_rx) = mpsc::channel::<MsgType>(BOUNDED_CHANNEL_SIZE);
 
-    let local_tx2 = local_tx.clone(); // clone before spawn
-
     // Loop to handle
-    // 1) async listening for new clients, or
-    let listener = ServerTcpListener::new(SERVER, clients, chat_names1, local_tx).await;
-    ServerTcpListener::spawn_accept(listener);
-
-    // Loop to handle
-    // 2) async channel read new data
-    let receiver = ServerLocalReceiver::new(local_rx, outgoing, chat_names2, local_tx2);
+    // 1) async channel read new data
+    let receiver = ServerLocalReceiver::new(local_rx, outgoing, chat_names.clone(), local_tx.clone());
     let handle = ServerLocalReceiver::spawn(receiver);
+
+    // Loop to handle
+    // 2) async listening for new clients, or
+    let listener = ServerTcpListener::new(SERVER, clients, chat_names, local_tx).await;
+    ServerTcpListener::spawn_accept(listener);
 
     handle.await.unwrap();
 
