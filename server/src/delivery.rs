@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
-use crate::server::Registry;
+use crate::server_types::Registry;
 
 const ALL_CLIENTS: usize = 0;
 

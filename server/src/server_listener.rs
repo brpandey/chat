@@ -5,7 +5,7 @@ use tokio::io;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 
-use crate::server::{Registry, MsgType};
+use crate::server_types::{Registry, MsgType};
 use crate::names::NamesShared;
 use crate::client_reader::ClientReader;
 
@@ -13,7 +13,7 @@ use tracing::{info};
 
 const COUNTER_SEED: usize = 1;
 
-pub struct ServerTcpListener {
+pub struct Listener {
     listener: TcpListener,
     clients: Registry,
     names: NamesShared,
@@ -21,7 +21,7 @@ pub struct ServerTcpListener {
     counter: Arc<AtomicUsize>,
 }
 
-impl ServerTcpListener {
+impl Listener {
     pub async fn new(addr: &str, clients: Registry, names: NamesShared, local_tx: Sender<MsgType>) -> Self {
         info!("Server starting.. {:?}", &addr);
 
@@ -39,7 +39,7 @@ impl ServerTcpListener {
         }
     }
 
-    pub fn spawn_accept(mut l: ServerTcpListener) {
+    pub fn spawn_accept(mut l: Listener) {
         let _h = tokio::spawn(async move {
             l.handle_accept().await.expect("accept terminated");
         });

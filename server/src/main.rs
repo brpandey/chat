@@ -9,9 +9,9 @@ use tracing::Level;
 
 use server::delivery::Delivery;
 use server::names::NamesShared;
-use server::server::{MsgType, Registry};
-use server::server_listener::ServerTcpListener;
-use server::server_channel::ServerLocalReceiver;
+use server::server_types::{MsgType, Registry};
+use server::server_listener::Listener;
+use server::server_channel::ChannelReceiver;
 
 const SERVER: &str = "127.0.0.1:4321";
 const BOUNDED_CHANNEL_SIZE: usize = 64;
@@ -34,13 +34,13 @@ async fn main() -> io::Result<()> {
 
     // Loop to handle
     // 1) async channel read new data
-    let receiver = ServerLocalReceiver::new(local_rx, outgoing, chat_names.clone(), local_tx.clone());
-    let handle = ServerLocalReceiver::spawn(receiver);
+    let receiver = ChannelReceiver::new(local_rx, outgoing, chat_names.clone(), local_tx.clone());
+    let handle = ChannelReceiver::spawn(receiver);
 
     // Loop to handle
     // 2) async listening for new clients, or
-    let listener = ServerTcpListener::new(SERVER, clients, chat_names, local_tx).await;
-    ServerTcpListener::spawn_accept(listener);
+    let listener = Listener::new(SERVER, clients, chat_names, local_tx).await;
+    Listener::spawn_accept(listener);
 
     handle.await.unwrap();
 

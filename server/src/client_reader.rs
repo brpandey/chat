@@ -11,8 +11,7 @@ use tokio_stream::StreamExt;
 
 use tracing::{info, debug, error};
 
-use crate::server::MsgType;
-use crate::server::Registry;
+use crate::server_types::{MsgType, Registry};
 use crate::names::NamesShared;
 
 const LINES_MAX_LEN: usize = 256;

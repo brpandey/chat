@@ -2,21 +2,21 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use tracing::{debug, info};
 
-use crate::server::MsgType;
+use crate::server_types::MsgType;
 use crate::delivery::Delivery;
 use crate::names::NamesShared;
 
-pub struct ServerLocalReceiver {
+pub struct ChannelReceiver {
     local_rx: Receiver<MsgType>,
     local_tx: Sender<MsgType>,
     outgoing: Delivery,
     names: NamesShared,
 }
 
-impl ServerLocalReceiver {
+impl ChannelReceiver {
 
     pub fn new(local_rx: Receiver<MsgType>, outgoing: Delivery, names: NamesShared, local_tx: Sender<MsgType>) -> Self {
-        ServerLocalReceiver {
+        ChannelReceiver {
             local_rx,
             local_tx,
             outgoing,
@@ -24,9 +24,9 @@ impl ServerLocalReceiver {
         }
     }
 
-    pub fn spawn(mut local: ServerLocalReceiver) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(mut r: ChannelReceiver) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            local.handle_receive().await;
+            r.handle_receive().await;
         })
     }
 
