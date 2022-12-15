@@ -7,13 +7,27 @@ use tokio::sync::RwLock;
 
 const USERS_MSG: &str = "Users currently online: ";
 
+const DELIMITER: &str = "_";
+const EXTRA_DELIMITER: &str = "!*#$";
+
 pub struct NamesShared {
     names: Arc<RwLock<Names>>
 }
 
+/*
+ Note:
+ If name needs to be removed (one that has a duplicate),
+ the name is removed from unique but still left in duplicate
+ such that the counter values of previous names aren't reproduced
+
+ Hence unique and duplicates both contain an owned type
+ as opposed to a String and a &str
+ Using a Rc<String> or such seemed to unwieldy
+ Using a BytesMut would cost because for every lookup it needs to copy the data into a BytesMut object
+ instead of a simple lookup with the ref operator
+ */
+
 pub struct Names {
-    // Note: could replace String with BytesMut to optimize
-    // duplicate map insert could just clone unique's ByteMut to limit allocs
     unique: HashSet<String>,
     duplicates: HashMap<String, usize>,
     last_fixed: Option<String>,
@@ -88,8 +102,6 @@ impl Names {
             true
         } else { // if name is dup, check dups map for next counter
 
-//            let v = self.duplicates.entry(name.as_str()).or_insert(2);
-
             let mut value = 2;
             if let Some(v) = self.duplicates.get_mut(&name) {
                 *v += 1;
@@ -98,14 +110,18 @@ impl Names {
                 self.duplicates.insert(name.clone(), value);
             }
 
-//            *v += 1;
             let v_string = value.to_string();
             // append counter value to name e.g. if "anna" already present then new name is "anna_2"
-            name.push_str("_");
+            name.push_str(DELIMITER);
             name.push_str(&v_string);
 
-            // update unique with new name
-            self.unique.insert(name.clone());
+            // update unique with new name, if THAT is already found
+            // then just append a strange string and call it a day
+            if !self.unique.insert(name.clone()) {
+                name.push_str(EXTRA_DELIMITER);
+                self.unique.insert(name.clone());
+            }
+
             self.last_fixed.replace(name);
             false
         }
