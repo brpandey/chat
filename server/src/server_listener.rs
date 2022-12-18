@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::AtomicU16;
 
 use tokio::io;
 use tokio::net::TcpListener;
@@ -11,14 +11,14 @@ use crate::client_reader::ClientReader;
 
 use tracing::{info};
 
-const COUNTER_SEED: usize = 1;
+const COUNTER_SEED: u16 = 1;
 
 pub struct Listener {
     listener: TcpListener,
     clients: Registry,
     names: NamesShared,
     local_tx: Sender<MsgType>,
-    counter: Arc<AtomicUsize>,
+    counter: Arc<AtomicU16>,
 }
 
 impl Listener {
@@ -28,7 +28,7 @@ impl Listener {
         let listener = TcpListener::bind(addr).await.expect("Unable to bind to server address");
 
         // Set up unique counter
-        let counter = Arc::new(AtomicUsize::new(COUNTER_SEED));
+        let counter = Arc::new(AtomicU16::new(COUNTER_SEED));
 
         Self {
             listener,

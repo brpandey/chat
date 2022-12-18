@@ -31,6 +31,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "protocol",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -259,6 +260,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ea3d908b0e36316caf9e9e2c4625cdde190a7e6f440d794667ed17a1855e725"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "protocol"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

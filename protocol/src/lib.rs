@@ -1,11 +1,14 @@
 use tokio_util::codec::{Encoder, Decoder};
 use bytes::{Buf, BufMut, BytesMut};
+//use tracing::info;
 
+#[derive(Debug)]
 pub enum ChatMsg {
     Request(Request),
     Response(Response),
 }
 
+#[derive(Debug, Clone)]
 pub enum Request { // b'+'
     Users, // b':'
     Quit, //  b'$'
@@ -19,6 +22,7 @@ pub enum Request { // b'+'
      */
 }
 
+#[derive(Debug, Clone)]
 pub enum Response { // b'-'
     UserMessage { // b'*'
         id: u16,
@@ -48,7 +52,7 @@ impl Decoder for ChatCodec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        loop { // need to remove loop
+//        loop { // need to remove loop
             let id: u16;
 
             if src.is_empty() || src.len() < 2 {
@@ -61,27 +65,24 @@ impl Decoder for ChatCodec {
                     b':' => return Ok(Some(ChatMsg::Request(Request::Users))),
                     b'$' => return Ok(Some(ChatMsg::Request(Request::Quit))),
                     b'#' => {
-                        src.advance(1);
                         let msg = decode_string(src)?;
                         return Ok(Some(ChatMsg::Request(Request::Message(msg))))
                     },
                     b'&' => {
-                        src.advance(1);
                         let msg = decode_string(src)?;
                         return Ok(Some(ChatMsg::Request(Request::JoinName(msg))))
                     },
                     _ => unimplemented!()
                 }
             } else if src[0] == b'-' {
-                match src[1] {
+                src.advance(1);
+                match src.get_u8() {
                     b'*' => { // todo need to handle case where we don't have enough bytes read..
-                        src.advance(2);
                         id = src.get_u16(); // id field
                         let msg = decode_string(src)?;
                         return Ok(Some(ChatMsg::Response(Response::UserMessage{id, msg})))
                     },
-                    b'&' => {
-                        src.advance(2);
+                    b'@' => {
                         let msg = decode_string(src)?;
                         return Ok(Some(ChatMsg::Response(Response::Notification(msg))))
                     },
@@ -90,7 +91,7 @@ impl Decoder for ChatCodec {
             } else {
                 unimplemented!()
             }
-        }
+      //  }
     }
 }
 
@@ -101,15 +102,21 @@ impl Encoder<Request> for ChatCodec {
     fn encode(&mut self, item: Request, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             Request::Users => {
+                dst.put_u8(b'+');
                 dst.put_u8(b':');
             },
             Request::Quit => {
+                dst.put_u8(b'+');
                 dst.put_u8(b'$');
             },
             Request::Message(msg) => {
+                dst.put_u8(b'+');
+                dst.put_u8(b'#');
                 encode_string(msg, dst);
             },
             Request::JoinName(msg) => {
+                dst.put_u8(b'+');
+                dst.put_u8(b'&');
                 encode_string(msg, dst);
             }
         }
@@ -124,10 +131,14 @@ impl Encoder<Response> for ChatCodec {
     fn encode(&mut self, item: Response, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             Response::UserMessage{id, msg} => {
+                dst.put_u8(b'-');
+                dst.put_u8(b'*');
                 dst.put_u16(id);
                 encode_string(msg, dst);
             },
             Response::Notification(msg) => {
+                dst.put_u8(b'-');
+                dst.put_u8(b'@');
                 encode_string(msg, dst);
             }
         }
@@ -138,9 +149,8 @@ impl Encoder<Response> for ChatCodec {
 
 // read bytes from BytesMut into String value 
 fn decode_string(src: &mut BytesMut) -> Result<String, std::io::Error> {
-    let str_len: u16 = src.get_u16(); // str_len field
+    let str_len = src.get_u16(); // str_len field
     let mut bytes: Vec<u8> = vec![0; str_len as usize]; // reserve a Vec
-    //    src.read_exact(&mut bytes); // read bytes len into bytes vec
     src.copy_to_slice(&mut bytes);
     String::from_utf8(bytes).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid utf8"))
 }
@@ -148,7 +158,6 @@ fn decode_string(src: &mut BytesMut) -> Result<String, std::io::Error> {
 // write String into bytes in BytesMut
 fn encode_string(msg: String, dst: &mut BytesMut) {
     dst.reserve(2 + msg.len());
-    let len_slice = u16::to_be_bytes(msg.len() as u16);
-    dst.extend_from_slice(&len_slice);
+    dst.put_u16(msg.len() as u16);
     dst.extend_from_slice(msg.as_bytes());
 }

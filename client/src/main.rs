@@ -1,21 +1,19 @@
 use std::io as stdio;
 use std::io::{stdout, Write};
 
-// use std::sync::atomic::{AtomicBool}, Ordering};
-// use std::sync::Arc;
-
 use tokio::select;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::io::{self, AsyncWriteExt}; //, AsyncReadExt};
+use tokio::io::{self}; //, AsyncWriteExt}; //, AsyncReadExt};
 
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
-use tokio_stream::StreamExt;
-
-use futures::SinkExt;
+use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
+use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 
 use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
+
+use protocol::{ChatMsg, ChatCodec, Request, Response};
 
 const SERVER: &str = "127.0.0.1:4321";
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
@@ -36,11 +34,13 @@ async fn main() -> io::Result<()> {
 //    let server_alive = Arc::new(AtomicBool::new(true));
 
     // split tcpstream so we can hand off to r & w tasks
-    let (client_read, mut client_write) = client.into_split();
-    let (local_tx, mut local_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (client_read, client_write) = client.into_split();
+    let (local_tx, mut local_rx) = mpsc::channel::<Request>(64);
+
+    let mut fw = FramedWrite::new(client_write, ChatCodec);
 
     if let Ok(Some(msg)) = read_sync_user_input(GREETINGS) {
-        client_write.write_all(&msg).await.expect("Unable to write to server");
+        fw.send(msg).await.expect("Unable to write to server");
     } else {
         error!("Unable to retrieve user chat name");
     }
@@ -48,20 +48,27 @@ async fn main() -> io::Result<()> {
 //    let server_alive_ref1 = Arc::clone(&server_alive);
 //    let server_alive_ref2 = Arc::clone(&server_alive);
 
-    let mut fr = FramedRead::new(client_read, LinesCodec::new());
+    let mut fr = FramedRead::new(client_read, ChatCodec);
 
     // Spawn client tcp read tokio task, to read back main server msgs
-      let server_read_handle = tokio::spawn(async move {
+    let server_read_handle = tokio::spawn(async move {
         loop {
             debug!("task A: listening to server replies...");
 
             // Read lines from server
             if let Some(value) = fr.next().await {
+                debug!("received server value is {:?}", value);
+
                 match value {
-                    Ok(line) => {
-                        let trimmed = line.trim_end();
-                        println!("> {}", trimmed);
+                    Ok(ChatMsg::Response(Response::UserMessage{id, msg})) => {
+                        let m = msg.trim_end();
+                        println!("> {} {}", id, m);
                     },
+                    Ok(ChatMsg::Response(Response::Notification(line))) => {
+                        let trimmed = line.trim_end();
+                        println!(">>> {}", trimmed);
+                    },
+                    Ok(_) => unimplemented!(),
                     Err(x) => {
                         debug!("Client Connection closing error: {:?}", x);
                         break;
@@ -75,15 +82,14 @@ async fn main() -> io::Result<()> {
 //        server_alive_ref1.swap(false, Ordering::Relaxed);
     });
 
-    let mut fw = FramedWrite::new(client_write, LinesCodec::new());
+
 
     // Spawn client tcp write tokio task, to send data to server
     let tcp_write_handle = tokio::spawn(async move {
         loop {
             // Read from channel, data received from command line
             if let Some(msg) = local_rx.recv().await {
-                let m = std::str::from_utf8(&msg).unwrap();
-                fw.send(m).await.expect("Unable to write to server");
+                fw.send(msg).await.expect("Unable to write to server");
             }
         }
     });
@@ -125,19 +131,20 @@ async fn main() -> io::Result<()> {
 }
 
 // blocking function to gather user input from std::io::stdin
-fn read_sync_user_input(prompt: &str) -> io::Result<Option<Vec<u8>>> {
+fn read_sync_user_input(prompt: &str) -> io::Result<Option<Request>> {
     let mut buf = String::new();
 
     print!("{} ", prompt);
     stdout().flush()?;  // Since stdout is line buffered need to explicitly flush
     stdio::stdin().read_line(&mut buf).expect("unable to read command line input");
 
-    let trimmed = buf.trim_end();
+    let name = buf.trim_end().to_string();
 
-    Ok(Some(trimmed.as_bytes().to_vec()))
+    Ok(Some(Request::JoinName(name)))
 }
 
-async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
+async fn read_async_user_input() -> io::Result<Option<Request>> {
+//async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
 
     if let Some(Ok(line)) = fr.next().await {
@@ -145,11 +152,10 @@ async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
         match line.as_str() {
             "\\quit" => {
                 info!("Session terminated by user...");
-                return Ok(None);
+                return Ok(Some(Request::Quit));
             },
             "\\users" => {
-                let res = line.strip_prefix("\\").unwrap().as_bytes().to_vec();
-                return Ok(Some(res))
+                return Ok(Some(Request::Users))
             },
             _ => (),
         }
@@ -163,8 +169,9 @@ async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
             total.push(line);
         }
 
-        let result: Vec<u8> = total.into_iter().flatten().collect();
-        return Ok(Some(result))
+        let msg: Vec<u8> = total.into_iter().flatten().collect();
+        let smsg = String::from_utf8(msg).unwrap();
+        return Ok(Some(Request::Message(smsg)))
     }
 
     Ok(None)

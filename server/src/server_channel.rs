@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::{Sender, Receiver};
-
 use tracing::{debug, info};
+use protocol::Response;
 
 use crate::server_types::MsgType;
 use crate::delivery::Delivery;
@@ -14,7 +14,6 @@ pub struct ChannelReceiver {
 }
 
 impl ChannelReceiver {
-
     pub fn new(local_rx: Receiver<MsgType>, outgoing: Delivery, names: NamesShared, local_tx: Sender<MsgType>) -> Self {
         ChannelReceiver {
             local_rx,
@@ -31,27 +30,37 @@ impl ChannelReceiver {
     }
 
     pub async fn handle_receive(&mut self) {
+        let mut response: Response;
+
         loop {
             if let Some(message) = self.local_rx.recv().await {
                 // Read data received from server and broadcast to all clients
                 debug!("Local channel msg received {:?}", &message);
 
+                // todo clean up all the String::from_utf8 constructions for msg
                 match message {
                     MsgType::Joined(cid, msg) => {
                         // broadcast join msg to all except for cid, then
                         // trigger 'current users' message as well for cid
-                        self.outgoing.broadcast_except(msg, cid).await;
+                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        self.outgoing.broadcast_except(cid, response).await;
                         self.local_tx.send(MsgType::Users(cid)).await.expect("Unable to tx");
                     },
-                    MsgType::JoinedAck(cid, msg) |
-                    MsgType::MessageSingle(cid, msg) => {//single send to single client cid
-                        self.outgoing.send(cid, msg).await;
+                    MsgType::JoinedAck(cid, msg) => {
+                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        self.outgoing.send(cid, response).await;
                     },
-                    MsgType::Message(cid, msg) => { //broadcast to all except for cid
-                        self.outgoing.broadcast_except(msg, cid).await;
+                    MsgType::MessageSingle(id, msg) => {//single send to single client cid
+                        response = Response::UserMessage{id, msg: String::from_utf8(msg).unwrap()};
+                        self.outgoing.send(id, response).await;
+                    },
+                    MsgType::Message(id, msg) => { //broadcast to all except for cid
+                        response = Response::UserMessage{id, msg: String::from_utf8(msg).unwrap()};
+                        self.outgoing.broadcast_except(id, response).await;
                     },
                     MsgType::Exited(msg) => { //broadcast to all
-                        self.outgoing.broadcast(msg).await;
+                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        self.outgoing.broadcast(response).await;
                     },
                     MsgType::Users(cid) => {
                         let users_msg = self.names.read().await.to_list();

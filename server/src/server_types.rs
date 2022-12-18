@@ -4,21 +4,24 @@ use std::net::SocketAddr;
 
 use tokio::sync::Mutex;
 use tokio::net::tcp;
+//use tokio_util::codec::FramedWrite;
 
+//use protocol::ChatCodec;
 
 // server type definitions
 
 // current client registry data
-pub type Registry = Arc<Mutex<HashMap<usize, RegistryEntry>>>;
+pub type Registry = Arc<Mutex<HashMap<u16, RegistryEntry>>>;
 pub type RegistryEntry = (SocketAddr, String, tcp::OwnedWriteHalf);
+//pub type RegistryEntry = (SocketAddr, String, FramedWrite<tcp::OwnedWriteHalf, ChatCodec>);
 
 
 #[derive(Debug)]
 pub enum MsgType {
-    Joined(usize, Vec<u8>),
-    JoinedAck(usize, Vec<u8>),
-    Message(usize, Vec<u8>),
-    MessageSingle(usize, Vec<u8>),
+    Joined(u16, Vec<u8>),
+    JoinedAck(u16, Vec<u8>),
+    Message(u16, Vec<u8>),
+    MessageSingle(u16, Vec<u8>),
     Exited(Vec<u8>),
-    Users(usize),
+    Users(u16),
 }
