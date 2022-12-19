@@ -6,15 +6,13 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use tokio::io::{self, Error, ErrorKind, AsyncReadExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc::Sender;
-use tokio_util::codec::{Decoder, FramedRead, /*FramedWrite*/};
+use tokio_util::codec::{Decoder, FramedRead};
 use tokio_stream::StreamExt;
 
 use bytes::BytesMut;
-
 use tracing::{info, debug, error};
 
 use protocol::{ChatMsg, ChatCodec, Request};
-
 use crate::server_types::{MsgType, Registry};
 use crate::names::NamesShared;
 
@@ -111,8 +109,8 @@ impl ClientReader {
         if let Ok(n) = self.tcp_read.as_mut().unwrap().read(&mut name_buf).await {
             name_buf.truncate(n);
             bm.extend_from_slice(&name_buf);
-            if let Some(ChatMsg::Request(Request::JoinName(name))) = chat.decode(&mut bm)? {
-                return Ok(name)
+            if let Some(ChatMsg::Client(Request::JoinName(name))) = chat.decode(&mut bm)? {
+                return String::from_utf8(name).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid utf8"))
             }
         }
 
@@ -140,23 +138,21 @@ impl ClientReader {
                 debug!("server received: {:?}", value);
 
                 match value {
-                    Ok(ChatMsg::Request(Request::Users)) => self.task_tx.send(MsgType::Users(self.client_id)).await.expect("Unable to tx"),
-                    Ok(ChatMsg::Request(Request::Quit)) => {
+                    Ok(ChatMsg::Client(Request::Users)) => self.task_tx.send(MsgType::Users(self.client_id)).await.expect("Unable to tx"),
+                    Ok(ChatMsg::Client(Request::Quit)) => {
                         self.process_disconnect().await;
                         break;
                     },
-                    Ok(ChatMsg::Request(Request::Message(msg))) => {
-                        let lines: Vec<&str> = msg.rsplitn(10, '\n').collect();
+                    Ok(ChatMsg::Client(Request::Message(msg))) => {
+                        let iter = msg.rsplit(|b| *b == b'\n');
 
-                        for line in lines.into_iter().rev().map(|s| s.to_owned()) {
+                        for mut line in iter.into_iter().rev().map(|l| l.to_owned()) {
                             if line.is_empty() { continue }
 
                             let mut msg: Vec<u8> = Vec::with_capacity(self.msg_prefix.len() + line.len() + 1);
                             let mut p = self.msg_prefix.clone();
-                            let mut line2 = line.into_bytes();
                             msg.append(&mut p);
-                            msg.append(&mut line2);
-//                            msg.push(b'\n');
+                            msg.append(&mut line);
 
                             // delegate the broadcast of msg echoing to another block
                             self.task_tx.send(MsgType::Message(self.client_id, msg)).await

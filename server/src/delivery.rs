@@ -39,8 +39,6 @@ impl Delivery {
             }
 
             let v = bm.to_vec();
-
-//            fw.send(&msg).await.expect("unable to write");
             ws.write_all(&v).await.expect("unable to write");
         }
     }
@@ -68,13 +66,8 @@ impl Delivery {
             let mut r = self.registry.lock().await;
 
             for (k, (_addr, _name, ws)) in r.iter_mut() {
-
-
                 if except_cid == *k { continue } // skip the send to except client id
-
                 let err = format!("Unable to write to tcp socket {:?}", k); // debug
-
-                //                fw.send(msg).await.expect(&err);
                 ws.write_all(&v).await.expect(&err);
             }
         }

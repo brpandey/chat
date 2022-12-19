@@ -19,12 +19,7 @@ pub struct NamesShared {
  If name needs to be removed (one that has a duplicate),
  the name is removed from unique but still left in duplicate
  such that the counter values of previous names aren't reproduced
-
  Hence unique and duplicates both contain an owned type
- as opposed to a String and a &str
- Using a Rc<String> or such seemed to unwieldy
- Using a BytesMut would cost because for every lookup it needs to copy the data into a BytesMut object
- instead of a simple lookup with the ref operator
  */
 
 pub struct Names {
@@ -83,7 +78,6 @@ impl Names {
         let mut joined: Vec<u8> = list.into_iter().flatten().collect();
         users_online = USERS_MSG.as_bytes().to_vec();
         users_online.append(&mut joined);
-        users_online.push(b'\n');
         users_online
     }
 

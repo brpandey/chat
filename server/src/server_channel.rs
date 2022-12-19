@@ -42,24 +42,24 @@ impl ChannelReceiver {
                     MsgType::Joined(cid, msg) => {
                         // broadcast join msg to all except for cid, then
                         // trigger 'current users' message as well for cid
-                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        response = Response::Notification(msg);
                         self.outgoing.broadcast_except(cid, response).await;
                         self.local_tx.send(MsgType::Users(cid)).await.expect("Unable to tx");
                     },
                     MsgType::JoinedAck(cid, msg) => {
-                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        response = Response::Notification(msg);
                         self.outgoing.send(cid, response).await;
                     },
                     MsgType::MessageSingle(id, msg) => {//single send to single client cid
-                        response = Response::UserMessage{id, msg: String::from_utf8(msg).unwrap()};
+                        response = Response::UserMessage{id, msg};
                         self.outgoing.send(id, response).await;
                     },
                     MsgType::Message(id, msg) => { //broadcast to all except for cid
-                        response = Response::UserMessage{id, msg: String::from_utf8(msg).unwrap()};
+                        response = Response::UserMessage{id, msg};
                         self.outgoing.broadcast_except(id, response).await;
                     },
                     MsgType::Exited(msg) => { //broadcast to all
-                        response = Response::Notification(String::from_utf8(msg).unwrap());
+                        response = Response::Notification(msg);
                         self.outgoing.broadcast(response).await;
                     },
                     MsgType::Users(cid) => {

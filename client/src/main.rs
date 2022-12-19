@@ -60,13 +60,11 @@ async fn main() -> io::Result<()> {
                 debug!("received server value is {:?}", value);
 
                 match value {
-                    Ok(ChatMsg::Response(Response::UserMessage{id, msg})) => {
-                        let m = msg.trim_end();
-                        println!("> {} {}", id, m);
+                    Ok(ChatMsg::Server(Response::UserMessage{id, msg})) => {
+                        println!("> {} {}", id, std::str::from_utf8(&msg).unwrap());
                     },
-                    Ok(ChatMsg::Response(Response::Notification(line))) => {
-                        let trimmed = line.trim_end();
-                        println!(">>> {}", trimmed);
+                    Ok(ChatMsg::Server(Response::Notification(line))) => {
+                        println!(">>> {}", std::str::from_utf8(&line).unwrap());
                     },
                     Ok(_) => unimplemented!(),
                     Err(x) => {
@@ -81,7 +79,6 @@ async fn main() -> io::Result<()> {
         }
 //        server_alive_ref1.swap(false, Ordering::Relaxed);
     });
-
 
 
     // Spawn client tcp write tokio task, to send data to server
@@ -138,13 +135,12 @@ fn read_sync_user_input(prompt: &str) -> io::Result<Option<Request>> {
     stdout().flush()?;  // Since stdout is line buffered need to explicitly flush
     stdio::stdin().read_line(&mut buf).expect("unable to read command line input");
 
-    let name = buf.trim_end().to_string();
+    let name = buf.trim_end().as_bytes().to_owned();
 
     Ok(Some(Request::JoinName(name)))
 }
 
 async fn read_async_user_input() -> io::Result<Option<Request>> {
-//async fn read_async_user_input() -> io::Result<Option<Vec<u8>>> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
 
     if let Some(Ok(line)) = fr.next().await {
@@ -170,8 +166,8 @@ async fn read_async_user_input() -> io::Result<Option<Request>> {
         }
 
         let msg: Vec<u8> = total.into_iter().flatten().collect();
-        let smsg = String::from_utf8(msg).unwrap();
-        return Ok(Some(Request::Message(smsg)))
+        //let smsg = String::from_utf8(msg).unwrap();
+        return Ok(Some(Request::Message(msg)))
     }
 
     Ok(None)
