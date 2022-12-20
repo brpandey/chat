@@ -156,6 +156,14 @@ async fn read_async_user_input() -> io::Result<Option<Request>> {
             "\\users" => {
                 return Ok(Some(Request::Users))
             },
+            value if value.starts_with("\\fork") => {
+                if let Some(name) = value.splitn(3, ' ').skip(1).take(1).next() {
+                    let name: Vec<u8> = name.as_bytes().to_owned();
+                    info!("Attempting to fork a session with {}", std::str::from_utf8(&name).unwrap());
+                    // todo -- local validation if name is present
+                    return Ok(Some(Request::ForkPeer{name}));
+                }
+            },
             _ => (),
         }
 

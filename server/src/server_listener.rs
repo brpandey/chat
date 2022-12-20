@@ -52,10 +52,8 @@ impl Listener {
 
             info!("Server received new client connection {:?}", &addr);
 
-            let reader = ClientHandler::new(tcp_read,
-                                           self.local_tx.clone(),
-                                           self.clients.clone(),
-                                           self.names.clone());
+            let reader = ClientHandler::new(tcp_read, self.local_tx.clone(),
+                                           self.clients.clone(), self.names.clone());
 
             ClientHandler::spawn(reader, addr, tcp_write, self.counter.clone());
         }

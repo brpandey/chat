@@ -142,9 +142,7 @@ impl ClientHandler {
                         break;
                     },
                     Ok(ChatMsg::Client(Request::Message(msg))) => {
-                        let iter = msg.rsplit(|b| *b == b'\n');
-
-                        for mut line in iter.into_iter().rev().map(|l| l.to_owned()) {
+                        for mut line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
                             if line.is_empty() { continue }
 
                             let mut msg: Vec<u8> = Vec::with_capacity(self.msg_prefix.len() + line.len() + 1);

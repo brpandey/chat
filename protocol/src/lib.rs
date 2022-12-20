@@ -3,6 +3,10 @@
 use tokio_util::codec::{Encoder, Decoder};
 use bytes::{Buf, BufMut, BytesMut};
 use std::net::SocketAddr;
+use std::str;
+
+// encode and decode bypasses traditional libraries
+// like serde or message pack
 
 //use tracing::info;
 const REQ: u8 = b'+';
@@ -17,7 +21,7 @@ const RESP: u8 = b'-';
 const RESP_USERMSG: u8 = b'*';
 const RESP_NOTIF: u8 = b'@';
 const RESP_FORKACK: u8 = b'^';
-const RESP_PEERDWN: u8 = b'~';
+const RESP_FPEERDWN: u8 = b'~';
 const RESP_HBEAT: u8 = b'!';
 
 const ASK: u8 = b'{';
@@ -41,8 +45,8 @@ pub enum Request { // b'+'
     Quit, //  b'$'
     Message(Vec<u8>), // b'#'
     JoinName(Vec<u8>), // b'&'
-    ForkPeer { // b'%'
-        id: u16,
+    ForkPeer{ // b'%'
+//        id: u16,
         name: Vec<u8>,
     },
     Heartbeat, // b'!'
@@ -86,6 +90,7 @@ impl Decoder for ChatCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let id: u16;
+        let msg: Vec<u8>;
 
         if src.is_empty() || src.len() < 2 {
             return Ok(None)
@@ -98,12 +103,17 @@ impl Decoder for ChatCodec {
                     REQ_USERS => return Ok(Some(ChatMsg::Client(Request::Users))),
                     REQ_QUIT => return Ok(Some(ChatMsg::Client(Request::Quit))),
                     REQ_MSG => {
-                        let msg = decode_vec(src)?;
+                        msg = decode_vec(src)?;
                         return Ok(Some(ChatMsg::Client(Request::Message(msg))))
                     },
                     REQ_NAME => {
-                        let msg = decode_vec(src)?;
+                        msg = decode_vec(src)?;
                         return Ok(Some(ChatMsg::Client(Request::JoinName(msg))))
+                    },
+                    REQ_FORKP => {
+//                        id = src.get_u16();
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Client(Request::ForkPeer{name: msg})))
                     },
                     _ => unimplemented!()
                 }
@@ -113,13 +123,20 @@ impl Decoder for ChatCodec {
                 match src.get_u8() {
                     RESP_USERMSG => { // todo need to handle case where we don't have enough bytes read..
                         id = src.get_u16(); // id field
-                        let msg = decode_vec(src)?;
+                        msg = decode_vec(src)?;
                         return Ok(Some(ChatMsg::Server(Response::UserMessage{id, msg})))
                     },
                     RESP_NOTIF => {
-                        let msg = decode_vec(src)?;
+                        msg = decode_vec(src)?;
                         return Ok(Some(ChatMsg::Server(Response::Notification(msg))))
                     },
+                    RESP_FORKACK => {
+                        id = src.get_u16();
+                        let name = decode_vec(src)?;
+                        let addr = decode_addr(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAck{id, name, addr})))
+                    },
+                    RESP_FPEERDWN => return Ok(Some(ChatMsg::Server(Response::ForkPeerDown))),
                     _ => unimplemented!()
                 }
             },
@@ -152,6 +169,11 @@ impl Encoder<Request> for ChatCodec {
                 dst.put_u8(REQ_NAME);
                 encode_vec(msg, dst);
             },
+            Request::ForkPeer{name} => {
+                dst.put_u8(REQ);
+                dst.put_u8(REQ_FORKP);
+                encode_vec(name, dst);
+            },
             _ => unimplemented!()
         }
         Ok(())
@@ -175,6 +197,17 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u8(RESP_NOTIF);
                 encode_vec(msg, dst);
             },
+            Response::ForkPeerAck{id, name, addr} => {
+                dst.put_u8(RESP);
+                dst.put_u8(RESP_FORKACK);
+                dst.put_u16(id);
+                encode_vec(name, dst);
+                encode_addr(addr, dst);
+            },
+            Response::ForkPeerDown => {
+                dst.put_u8(RESP);
+                dst.put_u8(RESP_FPEERDWN);
+            },
             _ => unimplemented!()
         }
 
@@ -182,17 +215,32 @@ impl Encoder<Response> for ChatCodec {
     }
 }
 
-// read bytes from BytesMut into String value 
+// read bytes from BytesMut into Vec<u8> value
 fn decode_vec(src: &mut BytesMut) -> Result<Vec<u8>, std::io::Error> {
-    let v_len = src.get_u16(); // str_len field
+    let v_len = src.get_u16(); // v_len field
     let mut bytes: Vec<u8> = vec![0; v_len as usize]; // reserve a Vec
     src.copy_to_slice(&mut bytes);
     Ok(bytes)
 }
 
-// write String into bytes in BytesMut
+// write Vec<u8> into BytesMut
 fn encode_vec(msg: Vec<u8>, dst: &mut BytesMut) {
     dst.reserve(2 + msg.len());
     dst.put_u16(msg.len() as u16);
     dst.extend_from_slice(&msg);
+}
+
+// read bytes from BytesMut into SocketAddr type
+fn decode_addr(src: &mut BytesMut) -> Result<SocketAddr, std::io::Error> {
+    let bytes = decode_vec(src)?;
+    let addr_str = str::from_utf8(&bytes)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid utf8"))?;
+
+    addr_str.parse().map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Addr parse error"))
+}
+
+// write SocketAddr type into BytesMut
+fn encode_addr(addr: SocketAddr, dst: &mut BytesMut) {
+    let bytes = addr.to_string().into_bytes();
+    encode_vec(bytes, dst)
 }
