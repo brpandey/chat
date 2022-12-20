@@ -13,7 +13,7 @@ use server::server_types::{MsgType, Registry};
 use server::server_listener::Listener;
 use server::server_channel::ChannelReceiver;
 
-const SERVER: &str = "127.0.0.1:4321";
+const SERVER: &str = "127.0.0.1:43210";
 const BOUNDED_CHANNEL_SIZE: usize = 64;
 
 #[tokio::main]

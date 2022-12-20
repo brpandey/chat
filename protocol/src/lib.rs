@@ -1,11 +1,38 @@
+#![allow(dead_code)]  // just temporary
+
 use tokio_util::codec::{Encoder, Decoder};
 use bytes::{Buf, BufMut, BytesMut};
+use std::net::SocketAddr;
+
 //use tracing::info;
+const REQ: u8 = b'+';
+const REQ_USERS: u8 = b':';
+const REQ_QUIT: u8 = b'$';
+const REQ_MSG: u8 = b'#';
+const REQ_NAME: u8 = b'&';
+const REQ_FORKP: u8 = b'%';
+const REQ_HBEAT: u8 = b'!';
+
+const RESP: u8 = b'-';
+const RESP_USERMSG: u8 = b'*';
+const RESP_NOTIF: u8 = b'@';
+const RESP_FORKACK: u8 = b'^';
+const RESP_PEERDWN: u8 = b'~';
+const RESP_HBEAT: u8 = b'!';
+
+const ASK: u8 = b'{';
+const ASK_LEAVE: u8 = b'?';
+const ASK_NOTE: u8 = b'>';
+
+const REPLY: u8 = b'}';
+const REPLY_NOTE: u8 = b'<';
 
 #[derive(Debug)]
 pub enum ChatMsg {
     Client(Request),
     Server(Response),
+    PeerA(Ask), // from
+    PeerB(Reply), // to
 }
 
 #[derive(Debug, Clone)]
@@ -14,12 +41,11 @@ pub enum Request { // b'+'
     Quit, //  b'$'
     Message(Vec<u8>), // b'#'
     JoinName(Vec<u8>), // b'&'
-/*    Fork { // b'%'
+    ForkPeer { // b'%'
         id: u16,
-        name: String,
+        name: Vec<u8>,
     },
-    Heartbeat,
-     */
+    Heartbeat, // b'!'
 }
 
 #[derive(Debug, Clone)]
@@ -31,18 +57,25 @@ pub enum Response { // b'-'
     Notification( // b'@', use for join and leave events, user lists etc..
         Vec<u8>
     ),
-    /*
-    ForkOk {
-        peer_id: u16,
-        peer_name: String,
-        peer_addr: SocketAddr,
+    ForkPeerAck { // b'^'
+        id: u16,
+        name: Vec<u8>,
+        addr: SocketAddr,
     },
-    ForkPeerDown,
-    Heartbeat,
-    */
+    ForkPeerDown, // b'~'
+    Heartbeat, // b'!'
 }
 
+#[derive(Debug, Clone)]
+pub enum Ask { // b'{'
+    Leave, // b'?'
+    Note(Vec<u8>), // b'>'
+}
 
+#[derive(Debug, Clone)]
+pub enum Reply { // b'}'
+    Note(Vec<u8>), // b'<'
+}
 
 pub struct ChatCodec; // unit struct
 
@@ -58,37 +91,39 @@ impl Decoder for ChatCodec {
             return Ok(None)
         }
 
-        if src[0] == b'+' {
-            src.advance(1);
-            match src.get_u8() {
-                b':' => return Ok(Some(ChatMsg::Client(Request::Users))),
-                b'$' => return Ok(Some(ChatMsg::Client(Request::Quit))),
-                b'#' => {
-                    let msg = decode_vec(src)?;
-                    return Ok(Some(ChatMsg::Client(Request::Message(msg))))
-                },
-                b'&' => {
-                    let msg = decode_vec(src)?;
-                    return Ok(Some(ChatMsg::Client(Request::JoinName(msg))))
-                },
-                _ => unimplemented!()
-            }
-        } else if src[0] == b'-' {
-            src.advance(1);
-            match src.get_u8() {
-                b'*' => { // todo need to handle case where we don't have enough bytes read..
-                    id = src.get_u16(); // id field
-                    let msg = decode_vec(src)?;
-                    return Ok(Some(ChatMsg::Server(Response::UserMessage{id, msg})))
-                },
-                b'@' => {
-                    let msg = decode_vec(src)?;
-                    return Ok(Some(ChatMsg::Server(Response::Notification(msg))))
-                },
-                _ => unimplemented!()
-            }
-        } else {
-            unimplemented!()
+        match src[0] {
+            REQ => {
+                src.advance(1);
+                match src.get_u8() {
+                    REQ_USERS => return Ok(Some(ChatMsg::Client(Request::Users))),
+                    REQ_QUIT => return Ok(Some(ChatMsg::Client(Request::Quit))),
+                    REQ_MSG => {
+                        let msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Client(Request::Message(msg))))
+                    },
+                    REQ_NAME => {
+                        let msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Client(Request::JoinName(msg))))
+                    },
+                    _ => unimplemented!()
+                }
+            },
+            RESP => {
+                src.advance(1);
+                match src.get_u8() {
+                    RESP_USERMSG => { // todo need to handle case where we don't have enough bytes read..
+                        id = src.get_u16(); // id field
+                        let msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::UserMessage{id, msg})))
+                    },
+                    RESP_NOTIF => {
+                        let msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::Notification(msg))))
+                    },
+                    _ => unimplemented!()
+                }
+            },
+            _ => unimplemented!()
         }
     }
 }
@@ -100,23 +135,24 @@ impl Encoder<Request> for ChatCodec {
     fn encode(&mut self, item: Request, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             Request::Users => {
-                dst.put_u8(b'+');
-                dst.put_u8(b':');
+                dst.put_u8(REQ);
+                dst.put_u8(REQ_USERS);
             },
             Request::Quit => {
-                dst.put_u8(b'+');
-                dst.put_u8(b'$');
+                dst.put_u8(REQ);
+                dst.put_u8(REQ_QUIT);
             },
             Request::Message(msg) => {
-                dst.put_u8(b'+');
-                dst.put_u8(b'#');
+                dst.put_u8(REQ);
+                dst.put_u8(REQ_MSG);
                 encode_vec(msg, dst);
             },
             Request::JoinName(msg) => {
-                dst.put_u8(b'+');
-                dst.put_u8(b'&');
+                dst.put_u8(REQ);
+                dst.put_u8(REQ_NAME);
                 encode_vec(msg, dst);
-            }
+            },
+            _ => unimplemented!()
         }
         Ok(())
     }
@@ -129,16 +165,17 @@ impl Encoder<Response> for ChatCodec {
     fn encode(&mut self, item: Response, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             Response::UserMessage{id, msg} => {
-                dst.put_u8(b'-');
-                dst.put_u8(b'*');
+                dst.put_u8(RESP);
+                dst.put_u8(RESP_USERMSG);
                 dst.put_u16(id);
                 encode_vec(msg, dst);
             },
             Response::Notification(msg) => {
-                dst.put_u8(b'-');
-                dst.put_u8(b'@');
+                dst.put_u8(RESP);
+                dst.put_u8(RESP_NOTIF);
                 encode_vec(msg, dst);
-            }
+            },
+            _ => unimplemented!()
         }
 
         Ok(())
@@ -147,8 +184,8 @@ impl Encoder<Response> for ChatCodec {
 
 // read bytes from BytesMut into String value 
 fn decode_vec(src: &mut BytesMut) -> Result<Vec<u8>, std::io::Error> {
-    let str_len = src.get_u16(); // str_len field
-    let mut bytes: Vec<u8> = vec![0; str_len as usize]; // reserve a Vec
+    let v_len = src.get_u16(); // str_len field
+    let mut bytes: Vec<u8> = vec![0; v_len as usize]; // reserve a Vec
     src.copy_to_slice(&mut bytes);
     Ok(bytes)
 }

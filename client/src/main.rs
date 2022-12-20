@@ -15,8 +15,11 @@ use tracing::{info, debug, error, Level};
 
 use protocol::{ChatMsg, ChatCodec, Request, Response};
 
-const SERVER: &str = "127.0.0.1:4321";
+const SERVER: &str = "127.0.0.1:43210";
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
+
+const LINES_MAX_LEN: usize = 256;
+const USER_LINES: usize = 64;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -141,10 +144,10 @@ fn read_sync_user_input(prompt: &str) -> io::Result<Option<Request>> {
 }
 
 async fn read_async_user_input() -> io::Result<Option<Request>> {
-    let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(256));
+    let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
 
     if let Some(Ok(line)) = fr.next().await {
-        // handle if any commands present
+        // handle user inputted commands
         match line.as_str() {
             "\\quit" => {
                 info!("Session terminated by user...");
@@ -156,8 +159,9 @@ async fn read_async_user_input() -> io::Result<Option<Request>> {
             _ => (),
         }
 
+        // if no commands, split up user input
         let mut total = vec![];
-        let mut citer = line.as_bytes().chunks(64);
+        let mut citer = line.as_bytes().chunks(USER_LINES);
 
         while let Some(c) = citer.next() {
             let mut line = c.to_vec();
@@ -166,7 +170,6 @@ async fn read_async_user_input() -> io::Result<Option<Request>> {
         }
 
         let msg: Vec<u8> = total.into_iter().flatten().collect();
-        //let smsg = String::from_utf8(msg).unwrap();
         return Ok(Some(Request::Message(msg)))
     }
 
