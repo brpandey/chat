@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::server_types::{Registry, MsgType};
 use crate::names::NamesShared;
-use crate::client_reader::ClientReader;
+use crate::client_handler::ClientHandler;
 
 use tracing::{info};
 
@@ -52,12 +52,12 @@ impl Listener {
 
             info!("Server received new client connection {:?}", &addr);
 
-            let reader = ClientReader::new(tcp_read,
+            let reader = ClientHandler::new(tcp_read,
                                            self.local_tx.clone(),
                                            self.clients.clone(),
                                            self.names.clone());
 
-            ClientReader::spawn(reader, addr, tcp_write, self.counter.clone());
+            ClientHandler::spawn(reader, addr, tcp_write, self.counter.clone());
         }
     }
 }

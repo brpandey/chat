@@ -16,15 +16,13 @@ use protocol::{ChatMsg, ChatCodec, Request};
 use crate::server_types::{MsgType, Registry};
 use crate::names::NamesShared;
 
-//const LINES_MAX_LEN: usize = 256;
-
 const USER_JOINED: &str = "User {} joined\n";
 const USER_JOINED_ACK: &str = "You have successfully joined as {} \n";
 const USER_LEFT: &str = "User {} has left\n";
 
 // Handles server communication from client
-// Essentially this models a client reader actor
-pub struct ClientReader {
+// Essentially this models a client actor on the server side
+pub struct ClientHandler {
     client_id: u16,
     tcp_read: Option<OwnedReadHalf>,
     task_tx: Sender<MsgType>,
@@ -33,7 +31,7 @@ pub struct ClientReader {
     msg_prefix: Vec<u8>,
 }
 
-impl ClientReader {
+impl ClientHandler {
 
     pub fn new(tcp_read: OwnedReadHalf, task_tx: Sender<MsgType>, clients: Registry,
                chat_names: NamesShared) -> Self {
@@ -48,11 +46,11 @@ impl ClientReader {
     }
 
     // Spawn tokio task to handle server socket reads from clients
-    pub fn spawn(mut client_reader: ClientReader, addr: SocketAddr, tcp_write: OwnedWriteHalf, counter: Arc<AtomicU16>) {
-        let _h = tokio::spawn(async move {
+    pub fn spawn(mut h: ClientHandler, addr: SocketAddr, tcp_write: OwnedWriteHalf, counter: Arc<AtomicU16>) {
+        let _ = tokio::spawn(async move {
             // if registration is successful then only handle client reads
-            if client_reader.register(addr, tcp_write, counter).await.is_ok() {
-                client_reader.handle_read().await;
+            if h.register(addr, tcp_write, counter).await.is_ok() {
+                h.handle_read().await;
             }
         });
     }
