@@ -69,6 +69,16 @@ async fn main() -> io::Result<()> {
                     Ok(ChatMsg::Server(Response::Notification(line))) => {
                         println!(">>> {}", std::str::from_utf8(&line).unwrap());
                     },
+                    Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, addr})) => {
+                        println!(">>> About to fork private session with {}", std::str::from_utf8(&name).unwrap());
+
+                        // spawn tokio task to send client requests to peer server address
+                        // PeerClient::spawn(addr);
+                    },
+                    Ok(ChatMsg::Server(Response::PeerUnavailable)) => {
+                        println!(">>> Unable to fork into private session as peer {} unavailable",
+                                 std::str::from_utf8(&name).unwrap());
+                    },
                     Ok(_) => unimplemented!(),
                     Err(x) => {
                         debug!("Client Connection closing error: {:?}", x);

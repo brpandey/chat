@@ -21,7 +21,7 @@ const RESP: u8 = b'-';
 const RESP_USERMSG: u8 = b'*';
 const RESP_NOTIF: u8 = b'@';
 const RESP_FORKACK: u8 = b'^';
-const RESP_FPEERDWN: u8 = b'~';
+const RESP_PEERUNAV: u8 = b'~';
 const RESP_HBEAT: u8 = b'!';
 
 const ASK: u8 = b'{';
@@ -61,12 +61,17 @@ pub enum Response { // b'-'
     Notification( // b'@', use for join and leave events, user lists etc..
         Vec<u8>
     ),
-    ForkPeerAck { // b'^'
+    ForkPeerAckA { // b'^'   same type this used for decode
         id: u16,
         name: Vec<u8>,
         addr: SocketAddr,
     },
-    ForkPeerDown, // b'~'
+    ForkPeerAckB { // b'^'   same type this used for encode
+        id: u16,
+        name: Vec<u8>,
+        addr: Vec<u8>,
+    },
+    PeerUnavailable(Vec<u8>), // b'~'
     Heartbeat, // b'!'
 }
 
@@ -134,9 +139,9 @@ impl Decoder for ChatCodec {
                         id = src.get_u16();
                         let name = decode_vec(src)?;
                         let addr = decode_addr(src)?;
-                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAck{id, name, addr})))
+                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{id, name, addr})))
                     },
-                    RESP_FPEERDWN => return Ok(Some(ChatMsg::Server(Response::ForkPeerDown))),
+                    RESP_PEERUNAV => return Ok(Some(ChatMsg::Server(Response::PeerUnavailable))),
                     _ => unimplemented!()
                 }
             },
@@ -197,16 +202,18 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u8(RESP_NOTIF);
                 encode_vec(msg, dst);
             },
-            Response::ForkPeerAck{id, name, addr} => {
+            Response::ForkPeerAckB{id, name, addr} => {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_FORKACK);
                 dst.put_u16(id);
                 encode_vec(name, dst);
-                encode_addr(addr, dst);
+                encode_vec(addr, dst); // upon encode socket addr is Vec<u8
+//                encode_addr(addr, dst);
             },
-            Response::ForkPeerDown => {
+            Response::PeerUnavailable(name) => {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_FPEERDWN);
+                encode_vec(name, dst);
             },
             _ => unimplemented!()
         }
@@ -231,7 +238,7 @@ fn encode_vec(msg: Vec<u8>, dst: &mut BytesMut) {
 }
 
 // read bytes from BytesMut into SocketAddr type
-fn decode_addr(src: &mut BytesMut) -> Result<SocketAddr, std::io::Error> {
+pub fn decode_addr(src: &mut BytesMut) -> Result<SocketAddr, std::io::Error> {
     let bytes = decode_vec(src)?;
     let addr_str = str::from_utf8(&bytes)
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid utf8"))?;
@@ -240,7 +247,7 @@ fn decode_addr(src: &mut BytesMut) -> Result<SocketAddr, std::io::Error> {
 }
 
 // write SocketAddr type into BytesMut
-fn encode_addr(addr: SocketAddr, dst: &mut BytesMut) {
+pub fn encode_addr(addr: SocketAddr, dst: &mut BytesMut) {
     let bytes = addr.to_string().into_bytes();
     encode_vec(bytes, dst)
 }
