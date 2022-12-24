@@ -37,7 +37,6 @@ impl ChannelReceiver {
                 // Read data received from server and broadcast to all clients
                 debug!("Local channel msg received {:?}", &message);
 
-                // todo clean up all the String::from_utf8 constructions for msg
                 match message {
                     MsgType::Joined(cid, msg) => {
                         // broadcast join msg to all except for cid, then
@@ -66,6 +65,14 @@ impl ChannelReceiver {
                         let users_msg = self.names.read().await.to_list();
                         self.local_tx.send(MsgType::MessageSingle(cid, users_msg)).await
                             .expect("Unable to tx");
+                    },
+                    MsgType::ForkPeerAck(cid, id, name, addr) => {
+                        response = Response::ForkPeerAckB{id, name, addr};
+                        self.outgoing.send(cid, response).await;
+                    },
+                    MsgType::PeerUnavailable(cid, name) => {
+                        response = Response::PeerUnavailable(name);
+                        self.outgoing.send(cid, response).await;
                     }
                 }
             } else {

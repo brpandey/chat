@@ -64,10 +64,14 @@ impl ClientHandler {
         self.client_id = counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
         info!("client_id is {}", self.client_id);
 
+        let addr_str: String;
+
         // Acquire write lock guard, insert new chat name, using new name if there was a collision
         {
             let mut lg = self.chat_names.write().await;
-            if !lg.insert(name.clone()) { // if collision happened, grab modified handle name
+            addr_str = format!("{}", &addr);
+            let addr_bytes = addr_str.as_bytes().to_vec();
+            if !lg.insert(name.clone(), (self.client_id, addr_bytes)) { // if collision happened, grab modified handle name
                 name = lg.last_collision().unwrap(); // retrieve updated name, has to be not None
 
                 // send msg back acknowledging user joined with updated chat name
@@ -83,7 +87,7 @@ impl ClientHandler {
         // Store client data into clients registry
         {
             let mut sc = self.clients.lock().await;
-            sc.entry(self.client_id).or_insert((addr.clone(), name.clone(), tcp_write));
+            sc.entry(self.client_id).or_insert((addr_str, name.clone(), tcp_write));
         }
 
         let join_msg = USER_JOINED.replace("{}", &name);
@@ -133,10 +137,11 @@ impl ClientHandler {
         loop {
             // Read lines from server
             if let Some(value) = fr.next().await {
-                debug!("server received: {:?}", value);
+                info!("server received: {:?}", value);
 
                 match value {
-                    Ok(ChatMsg::Client(Request::Users)) => self.task_tx.send(MsgType::Users(self.client_id)).await.expect("Unable to tx"),
+                    Ok(ChatMsg::Client(Request::Users)) =>
+                        self.task_tx.send(MsgType::Users(self.client_id)).await.expect("Unable to tx"),
                     Ok(ChatMsg::Client(Request::Quit)) => {
                         self.process_disconnect().await;
                         break;
@@ -155,7 +160,17 @@ impl ClientHandler {
                                 .expect("Unable to tx");
                         }
                     },
-                    Ok(_) => continue,
+                    Ok(ChatMsg::Client(Request::ForkPeer{name})) => {
+                        // retrieve client id and addr from names if still active
+                        let name_key = std::str::from_utf8(&name).unwrap_or_default();
+                        if let Some((peer_id, sock_str)) = self.chat_names.read().await.get(&name_key) {
+                            let msg = MsgType::ForkPeerAck(self.client_id, *peer_id, name, sock_str.to_owned());
+                            self.task_tx.send(msg).await.expect("Unable to tx");
+                        } else {
+                            self.task_tx.send(MsgType::PeerUnavailable(self.client_id, name)).await.expect("Unable to tx");
+                        }
+                    },
+                    Ok(_) => unimplemented!(),
                     Err(x) => {
                         debug!("Server Connection closing error: {:?}", x);
                         break;

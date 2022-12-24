@@ -1,9 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::ops::Deref;
 
 use tokio::sync::RwLock;
 // use tracing::info;
+
+
+type ActiveEntry = (u16, Vec<u8>);
 
 const USERS_MSG: &str = "Users currently online: ";
 
@@ -17,15 +20,16 @@ pub struct NamesShared {
 /*
  Note:
  If name needs to be removed (one that has a duplicate),
- the name is removed from unique but still left in duplicate
+ the name is removed from active but still left in duplicate
  such that the counter values of previous names aren't reproduced
- Hence unique and duplicates both contain an owned type
+ Hence unique and duplicates both contain an owned type otherwise
+ must use Arc or Owning_ref type
  */
 
 pub struct Names {
-    unique: HashSet<String>,
-    duplicates: HashMap<String, usize>,
-    last_fixed: Option<String>,
+    active: HashMap<String, ActiveEntry>, // active names with client id
+    duplicates: HashMap<String, usize>, // maps name to counter
+    last_fixed: Option<String>, // tracks the last fixed value
 }
 
 impl NamesShared {
@@ -55,7 +59,7 @@ impl Deref for NamesShared {
 impl Names {
     pub fn new() -> Self {
         Names {
-            unique: HashSet::new(),
+            active: HashMap::new(),
             duplicates: HashMap::new(),
             last_fixed: None,
         }
@@ -67,10 +71,10 @@ impl Names {
         let mut users_online: Vec<u8>;
         let mut list: Vec<Vec<u8>>;
 
-        let set = &self.unique;
-        list = Vec::with_capacity(set.len()*2);
+        let map = &self.active;
+        list = Vec::with_capacity(map.len()*2);
 
-        for n in set.iter() {
+        for n in map.keys() {
             list.push(n.clone().into_bytes());
             list.push(vec![b' ']);
         }
@@ -81,39 +85,40 @@ impl Names {
         users_online
     }
 
-    // Follows HashSet insert semantics returning bool, e.g.
+    // Follows HashSet (not HashMap) insert semantics returning bool, e.g.
     // If the set did not previously contain this value, true is returned.
     // If the set already contained this value, false is returned.
-    pub fn insert(&mut self, mut name: String) -> bool {
+    pub fn insert(&mut self, mut name: String, value: (u16, Vec<u8>)) -> bool {
         // remove names ending with special character
         if name.ends_with("_") {
             name = name.trim_end_matches('_').to_owned();
         }
 
-        // if never seen insert and return
-        if !self.unique.contains(&name) {
-            self.unique.insert(name);
+        // if never seen, insert and return
+        if !self.active.contains_key(&name) {
+            self.active.insert(name.clone(), value);
             true
         } else { // if name is dup, check dups map for next counter
-
-            let mut value = 2;
+            let mut v_ctr = 2;
             if let Some(v) = self.duplicates.get_mut(&name) {
                 *v += 1;
-                value = *v;
+                v_ctr = *v;
             } else {
-                self.duplicates.insert(name.clone(), value);
+                self.duplicates.insert(name.clone(), v_ctr);
             }
 
-            let v_string = value.to_string();
+             let v_string = v_ctr.to_string();
             // append counter value to name e.g. if "anna" already present then new name is "anna_2"
             name.push_str(DELIMITER);
             name.push_str(&v_string);
 
-            // update unique with new name, if THAT is already found
+            // update active with new name, if THAT is already found
             // then just append a strange string and call it a day
-            if !self.unique.insert(name.clone()) {
+            if  self.active.contains_key(&name) {
                 name.push_str(EXTRA_DELIMITER);
-                self.unique.insert(name.clone());
+                self.active.insert(name.clone(), value);
+            } else {
+                self.active.insert(name.clone(), value);
             }
 
             self.last_fixed.replace(name);
@@ -127,10 +132,19 @@ impl Names {
         self.last_fixed.take()
     }
 
-    pub fn remove(&mut self, name: &String) -> bool {
-        // only remove from hashset,
-        // if there was a duplicate entry just leave it with its
-        // counter value
-        self.unique.remove(name)
+    pub fn remove(&mut self, name: &str) -> Option<ActiveEntry> {
+        // Only remove from map, if there was a duplicate entry
+        // just leave it with its counter value
+        self.active.remove(name)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&ActiveEntry> {
+        self.active.get(name)
+
+//        if let Some((id, _socket_str)) = self.active.get(name) {
+//            return Some(*id)
+//        }
+
+//        None
     }
 }

@@ -141,7 +141,10 @@ impl Decoder for ChatCodec {
                         let addr = decode_addr(src)?;
                         return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{id, name, addr})))
                     },
-                    RESP_PEERUNAV => return Ok(Some(ChatMsg::Server(Response::PeerUnavailable))),
+                    RESP_PEERUNAV => {
+                        let name = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::PeerUnavailable(name))));
+                    },
                     _ => unimplemented!()
                 }
             },
@@ -212,7 +215,7 @@ impl Encoder<Response> for ChatCodec {
             },
             Response::PeerUnavailable(name) => {
                 dst.put_u8(RESP);
-                dst.put_u8(RESP_FPEERDWN);
+                dst.put_u8(RESP_PEERUNAV);
                 encode_vec(name, dst);
             },
             _ => unimplemented!()
