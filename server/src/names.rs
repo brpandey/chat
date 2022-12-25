@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 // use tracing::info;
 
 
-type ActiveEntry = (u16, Vec<u8>);
+type ActiveEntry = (u16, Vec<u8>); // cid, socket addr as bytes
 
 const USERS_MSG: &str = "Users currently online: ";
 
