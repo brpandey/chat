@@ -22,6 +22,7 @@ pub struct Listener {
 }
 
 impl Listener {
+
     pub async fn new(addr: &str, clients: Registry, names: NamesShared, local_tx: Sender<MsgType>) -> Self {
         info!("Server starting.. {:?}", &addr);
 

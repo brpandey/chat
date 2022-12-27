@@ -16,9 +16,9 @@ use protocol::{ChatMsg, ChatCodec, Request};
 use crate::server_types::{MsgType, Registry};
 use crate::names::NamesShared;
 
-const USER_JOINED: &str = "User {} joined\n";
-const USER_JOINED_ACK: &str = "You have successfully joined as {} \n";
-const USER_LEFT: &str = "User {} has left\n";
+const USER_JOINED: &str = "User {} joined";
+const USER_JOINED_ACK: &str = "You have successfully joined as {}";
+const USER_LEFT: &str = "User {} has left";
 
 // Handles server communication from client
 // Essentially this models a client actor on the server side
