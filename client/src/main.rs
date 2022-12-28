@@ -15,7 +15,13 @@ use tracing::{info, debug, error, Level};
 
 use protocol::{ChatMsg, ChatCodec, Request, Response};
 
+use client::peer_client::PeerClient;
+use client::peer_server::PeerServerListener;
+
 const SERVER: &str = "127.0.0.1:43210";
+const PEER_SERVER: &str = "127.0.0.1:43310";
+const PEER_SERVER_PORT: u16 = 43310;
+
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
 
 const LINES_MAX_LEN: usize = 256;
@@ -33,6 +39,13 @@ async fn main() -> io::Result<()> {
 
     let client = TcpStream::connect(SERVER).await
         .map_err(|e| { error!("Unable to connect to server"); e })?;
+
+    info!("Client peer server starting {:?}", &PEER_SERVER);
+
+    // start up peer server for clients that connect to this node for
+    // peer to peer chat.
+    PeerServerListener::spawn_accept(PEER_SERVER.to_owned());
+
 
 //    let server_alive = Arc::new(AtomicBool::new(true));
 
@@ -69,13 +82,23 @@ async fn main() -> io::Result<()> {
                     Ok(ChatMsg::Server(Response::Notification(line))) => {
                         println!(">>> {}", std::str::from_utf8(&line).unwrap());
                     },
-                    Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, addr})) => {
-                        println!(">>> About to fork private session with {}", std::str::from_utf8(&name).unwrap());
+                    Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, mut addr})) => {
+                        println!(">>> About to fork private session with {} {}", id, std::str::from_utf8(&name).unwrap());
 
                         // spawn tokio task to send client requests to peer server address
-                        // PeerClient::spawn(addr);
+                        // responding to server requests will take a lower priority
+                        // unless the user explicitly switches over to communicating with the server from
+                        // peer to peer mode
+
+                        // drop current port of addr and add PEER_SERVER_PORT to addr
+                        addr.set_port(PEER_SERVER_PORT);
+                        let addr_str = format!("{}", &addr);
+                        PeerClient::spawn_a(addr_str.to_owned());
+
+                        // should probably set some cond var that blocks other threads from reading from stdin
+                        // until user explicitly switches to client -> server mode
                     },
-                    Ok(ChatMsg::Server(Response::PeerUnavailable)) => {
+                    Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                         println!(">>> Unable to fork into private session as peer {} unavailable",
                                  std::str::from_utf8(&name).unwrap());
                     },

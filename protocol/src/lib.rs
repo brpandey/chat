@@ -77,12 +77,15 @@ pub enum Response { // b'-'
 
 #[derive(Debug, Clone)]
 pub enum Ask { // b'{'
-    Leave, // b'?'
+    Hello(Vec<u8>), // b'|'           // peer a hello request
+    Leave(Vec<u8>), // b'?'
     Note(Vec<u8>), // b'>'
 }
 
 #[derive(Debug, Clone)]
 pub enum Reply { // b'}'
+    Hello(Vec<u8>), // b'|'          // peer b hello reply
+    Leave(Vec<u8>), // b'?'
     Note(Vec<u8>), // b'<'
 }
 
@@ -224,6 +227,33 @@ impl Encoder<Response> for ChatCodec {
         Ok(())
     }
 }
+
+impl Encoder<ChatMsg> for ChatCodec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, _item: ChatMsg, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl Encoder<Ask> for ChatCodec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, _item: Ask, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl Encoder<Reply> for ChatCodec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, _item: Reply, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+
+
 
 // read bytes from BytesMut into Vec<u8> value
 fn decode_vec(src: &mut BytesMut) -> Result<Vec<u8>, std::io::Error> {

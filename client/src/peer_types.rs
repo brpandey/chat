@@ -1,6 +1,6 @@
-
+#[derive(Debug)]
 pub enum PeerMsgType {
-    Hello(u16, Vec<u8>),
-    Note(u16, Vec<u8>),
-    Leave(u16),
+    Hello(Vec<u8>),
+    Note(Vec<u8>),
+    Leave(Vec<u8>),
 }
