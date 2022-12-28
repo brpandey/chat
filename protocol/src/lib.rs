@@ -25,10 +25,13 @@ const RESP_PEERUNAV: u8 = b'~';
 const RESP_HBEAT: u8 = b'!';
 
 const ASK: u8 = b'{';
+const ASK_HELLO: u8 = b'*';
 const ASK_LEAVE: u8 = b'?';
 const ASK_NOTE: u8 = b'>';
 
 const REPLY: u8 = b'}';
+const REPLY_HELLO: u8 = b'*';
+const REPLY_LEAVE: u8 = b'?';
 const REPLY_NOTE: u8 = b'<';
 
 #[derive(Debug)]
@@ -151,6 +154,42 @@ impl Decoder for ChatCodec {
                     _ => unimplemented!()
                 }
             },
+            ASK => {
+                src.advance(1);
+                match src.get_u8() {
+                    ASK_HELLO => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerA(Ask::Hello(msg))));
+                    },
+                    ASK_LEAVE => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerA(Ask::Leave(msg))));
+                    },
+                    ASK_NOTE => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerA(Ask::Leave(msg))));
+                    },
+                    _ => unimplemented!()
+                }
+            },
+            REPLY => {
+                src.advance(1);
+                match src.get_u8() {
+                    REPLY_HELLO => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerB(Reply::Hello(msg))));
+                    },
+                    REPLY_LEAVE => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerB(Reply::Leave(msg))));
+                    },
+                    REPLY_NOTE => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::PeerB(Reply::Leave(msg))));
+                    },
+                    _ => unimplemented!()
+                }
+            },
             _ => unimplemented!()
         }
     }
@@ -228,18 +267,28 @@ impl Encoder<Response> for ChatCodec {
     }
 }
 
-impl Encoder<ChatMsg> for ChatCodec {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, _item: ChatMsg, _dst: &mut BytesMut) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
 impl Encoder<Ask> for ChatCodec {
     type Error = std::io::Error;
 
-    fn encode(&mut self, _item: Ask, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Ask, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        match item {
+            Ask::Hello(msg) => {
+                dst.put_u8(ASK);
+                dst.put_u8(ASK_HELLO);
+                encode_vec(msg, dst);
+            },
+            Ask::Leave(msg) => {
+                dst.put_u8(ASK);
+                dst.put_u8(ASK_LEAVE);
+                encode_vec(msg, dst);
+            },
+            Ask::Note(msg) => {
+                dst.put_u8(ASK);
+                dst.put_u8(ASK_NOTE);
+                encode_vec(msg, dst);
+            }
+        }
+
         Ok(())
     }
 }
@@ -247,13 +296,28 @@ impl Encoder<Ask> for ChatCodec {
 impl Encoder<Reply> for ChatCodec {
     type Error = std::io::Error;
 
-    fn encode(&mut self, _item: Reply, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Reply, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        match item {
+            Reply::Hello(msg) => {
+                dst.put_u8(REPLY);
+                dst.put_u8(REPLY_HELLO);
+                encode_vec(msg, dst);
+            },
+            Reply::Leave(msg) => {
+                dst.put_u8(REPLY);
+                dst.put_u8(REPLY_LEAVE);
+                encode_vec(msg, dst);
+            },
+            Reply::Note(msg) => {
+                dst.put_u8(REPLY);
+                dst.put_u8(REPLY_NOTE);
+                encode_vec(msg, dst);
+            }
+        }
+
         Ok(())
     }
 }
-
-
-
 
 // read bytes from BytesMut into Vec<u8> value
 fn decode_vec(src: &mut BytesMut) -> Result<Vec<u8>, std::io::Error> {

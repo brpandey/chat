@@ -148,7 +148,7 @@ impl PeerServerWriter {
                 Some(msg_a) = self.local_rx.recv() => {
                     match msg_a {
                         PeerMsgType::Hello(m) => {
-                            reply = ChatMsg::PeerB(Reply::Hello(m));
+                            reply = Reply::Hello(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
                         _ => unimplemented!(),
@@ -158,11 +158,11 @@ impl PeerServerWriter {
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
                         PeerMsgType::Leave(m) => { // eventually handle case where peer b wants to leave
-                            reply = ChatMsg::PeerB(Reply::Leave(m));
+                            reply = Reply::Leave(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
                         PeerMsgType::Note(m) => {
-                            reply = ChatMsg::PeerB(Reply::Note(m));
+                            reply = Reply::Note(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
                         _ => unimplemented!(),
