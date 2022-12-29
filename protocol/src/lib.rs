@@ -167,7 +167,7 @@ impl Decoder for ChatCodec {
                     },
                     ASK_NOTE => {
                         msg = decode_vec(src)?;
-                        return Ok(Some(ChatMsg::PeerA(Ask::Leave(msg))));
+                        return Ok(Some(ChatMsg::PeerA(Ask::Note(msg))));
                     },
                     _ => unimplemented!()
                 }
@@ -185,7 +185,7 @@ impl Decoder for ChatCodec {
                     },
                     REPLY_NOTE => {
                         msg = decode_vec(src)?;
-                        return Ok(Some(ChatMsg::PeerB(Reply::Leave(msg))));
+                        return Ok(Some(ChatMsg::PeerB(Reply::Note(msg))));
                     },
                     _ => unimplemented!()
                 }

@@ -1,6 +1,8 @@
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
+use std::io::ErrorKind;
+
 use crate::peer_client::PeerClient;
 use crate::peer_server_handler::PeerServerHandler;
 
@@ -14,7 +16,14 @@ impl PeerServerListener {
     pub fn spawn_accept(addr: String) {
         let _h = tokio::spawn(async move {
 
-            let listen = TcpListener::bind(addr).await.expect("Unable to bind to server address");
+            let result = TcpListener::bind(addr).await;
+
+            if result.is_err() && result.as_ref().unwrap_err().kind() == ErrorKind::AddrInUse {
+                info!("Peer server address already in use, can not have more than 1 peer client on the same machine");
+                return;
+            }
+
+            let listen = result.expect("Unable to bind to server address");
 
             loop {
                 if let Ok((tcp_socket, addr)) = listen.accept().await {
@@ -30,7 +39,7 @@ impl PeerServerListener {
                     PeerClient::spawn_b(client_rx, server_tx);
 
                     let mut handler = PeerServerHandler::new(tcp_read, tcp_write, client_tx, server_rx);
-                    handler.spawn();
+                    handler.spawn().await;
                 } else {
                     break;
                 }

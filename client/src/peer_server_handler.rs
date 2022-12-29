@@ -56,22 +56,23 @@ impl PeerServerHandler {
         }
     }
 
-    pub fn spawn(&mut self) {
+    pub async fn spawn(&mut self) {
         let mut r = self.reader.take().unwrap();
         let mut w = self.writer.take().unwrap();
 
         // Spawn tokio task to handle server socket reads from clients
-        let _read = tokio::spawn(async move {
+        let read = tokio::spawn(async move {
             r.handle_read().await;
         });
 
         // Spawn tokio task to handle server socket writes to clients
-        let _write = tokio::spawn(async move {
+        let write = tokio::spawn(async move {
             w.handle_write().await;
         });
 
-        // exit once server read is finished, e.g. client has left
-//        read.await.unwrap();
+        //exit once server read is finished, e.g. client has left
+        read.await.unwrap();
+//        write.await.unwrap();
     }
 }
 
@@ -81,9 +82,11 @@ impl PeerServerReader {
         let input = self.tcp_read.take().unwrap();
         let mut fr = FramedRead::new(input, ChatCodec);
 
+        info!("this is the peer server handle_read spawned task");
+
         loop {
             if let Some(value) = fr.next().await {
-                info!("server received: {:?}", value);
+                info!("peer server received: {:?}", value);
 
                 match value {
                     Ok(ChatMsg::PeerA(Ask::Hello(name))) => {
@@ -123,7 +126,7 @@ impl PeerServerReader {
 
     // process client disconnection event
     async fn process_disconnect(&mut self, name: Vec<u8>) {
-        info!("Client connection has closed");
+        info!("Process Disconnect - Client connection has closed");
         let name_str = std::str::from_utf8(&name).unwrap_or_default();
         let leave_msg = PEER_LEFT.replace("{}", name_str).into_bytes();
 
@@ -141,11 +144,16 @@ impl PeerServerWriter {
         let mut fw = FramedWrite::new(input, ChatCodec);
         let mut reply;
 
+        info!("this is the peer server handle_write spawned task");
+
         //
         loop {
             select! {
             // Read from local read channel, data received from tcp client peer a
                 Some(msg_a) = self.local_rx.recv() => {
+
+                    info!("peer server -- type a - received in its server msg queue: {:?}", &msg_a);
+
                     match msg_a {
                         PeerMsgType::Hello(m) => {
                             reply = Reply::Hello(m);
@@ -155,13 +163,16 @@ impl PeerServerWriter {
                     }
                 }
                 Some(msg_b) = self.peer_b_server_rx.recv() => {
+                    info!("peer server -- type b - received in its server msg queue: {:?}", &msg_b);
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
                         PeerMsgType::Leave(m) => { // eventually handle case where peer b wants to leave
+                            info!("reply back to client with Leave ");
                             reply = Reply::Leave(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
                         PeerMsgType::Note(m) => {
+                            info!("reply back to client with Note ");
                             reply = Reply::Note(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },

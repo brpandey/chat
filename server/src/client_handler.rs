@@ -137,7 +137,7 @@ impl ClientHandler {
         loop {
             // Read lines from server
             if let Some(value) = fr.next().await {
-                info!("server received: {:?}", value);
+                info!("server received: {:?}", &value);
 
                 match value {
                     Ok(ChatMsg::Client(Request::Users)) =>

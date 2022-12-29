@@ -3,7 +3,7 @@ use tokio::net::tcp;
 use tokio::sync::mpsc::{self, Sender, Receiver};
 use tokio_util::codec::{LinesCodec, FramedRead, FramedWrite};
 use tokio::net::TcpStream;
-use tokio::io::{self, empty}; //, empty, sink}; 
+use tokio::io::{self}; //, empty, sink}; 
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
@@ -28,36 +28,45 @@ pub enum PeerType {
 pub struct PeerRead {
     tcp_read: Option<tcp::OwnedReadHalf>, // Some, use if type A
     client_rx: Option<Receiver<PeerMsgType>>, // Some, use if type B
-    client_type: PeerType,
 }
 
 impl PeerRead {
     pub fn new(tcp_read: Option<tcp::OwnedReadHalf>,
-               client_rx: Option<Receiver<PeerMsgType>>,
-               client_type: PeerType) -> Self {
+               client_rx: Option<Receiver<PeerMsgType>>) -> Self {
         Self {
             tcp_read,
             client_rx,
-            client_type,
         }
     }
 
     // Loop to handle ongoing client msgs to server
     async fn handle_peer_read(&mut self) {
-       /* let mut fr: FramedRead<Pin<Box<dyn AsyncRead>>, ChatCodec>;
-
-        // handle if tcp_read not specified with empty stream that always returns None
-        if self.tcp_read.is_none() {
-            fr = FramedRead::new(Box::pin(empty()), ChatCodec);
-        } else {
-            fr = FramedRead::new(Box::pin(self.tcp_read.take().unwrap()), ChatCodec);
-        }
-         */
-
-        let mut fr = FramedRead::new(self.tcp_read.take().unwrap(), ChatCodec);
 
         loop {
             debug!("task A: listening to peer server replies...");
+
+            // Wrap handling of tcp_read which may be None
+            let read_a = async {
+                match &mut self.tcp_read {
+                    Some(ref mut read) => {
+                        let mut fr = FramedRead::new(read, ChatCodec);
+                        Some(fr.next().await)
+                    },
+                    None => None,
+                }
+            };
+
+
+            // Wrap handling of client_rx msg queue stream into another future to get
+            // around weird tokio::select behaviour of still evaluating branch expression
+            // even if conditional if expression is not true (e.g. and then calling unwrap on None)
+
+            let read_b = async {
+                match &mut self.client_rx {
+                    Some(ref mut rx) => Some(rx.recv().await),
+                    None => None,
+                }
+            };
 
             // In peer to peer mode, we have peer A and peer B,
             // peer A talks to peer B by sending a TCP message to B and B listens for messages
@@ -71,45 +80,48 @@ impl PeerRead {
                 // Type B code
                 // Display server received message and as peer B respond as fit
                 // via command line
-                Some(msg_b) = self.client_rx.as_mut().unwrap().recv(), if self.client_rx.is_some() => {
-//                Some(msgB) = self.client_rx.as_mut().map(|e| async { e.recv().await} ) => {
+                  Some(msg_b) = read_b => {
+                      //  Some(msg_b) = self.client_rx.as_mut().unwrap().recv(), if self.client_rx.is_some() => {
                     debug!("received X local channel peer server value is {:?}", msg_b);
 
                     match msg_b {
                         // if peer A wants to leave then terminate this peer 
-                        PeerMsgType::Leave(name) => {
+                        Some(PeerMsgType::Leave(name)) => {
                             println!("< {} >", std::str::from_utf8(&name).unwrap());
                             return
                         },
-                        PeerMsgType::Hello(msg) => {
+                        Some(PeerMsgType::Hello(msg)) => {
                             println!("< {} >", std::str::from_utf8(&msg).unwrap());
                         },
-                        PeerMsgType::Note(msg) => {
+                        Some(PeerMsgType::Note(msg)) => {
                             println!("P> {}", std::str::from_utf8(&msg).unwrap());
                         },
+                        _ => unimplemented!(),
                     }
                 }
                 // Type A code
                 // Read lines from server via tcp if we are peer A in the above scenario
-                Some(msg_a) = fr.next() => {
+                Some(msg_a) = read_a => {
+//                Some(msg_a) = fr.next() => {
                     debug!("received Y tcp peer server value is {:?}", msg_a);
 
                     match msg_a {
-                        Ok(ChatMsg::PeerB(Reply::Leave(msg))) => { // peer B has left, terminate this peer
+                        Some(Ok(ChatMsg::PeerB(Reply::Leave(msg)))) => { // peer B has left, terminate this peer
                             println!("< {} >", std::str::from_utf8(&msg).unwrap());
                             return
                         },
-                        Ok(ChatMsg::PeerB(Reply::Hello(msg))) => { // peer B has responded with hello
+                        Some(Ok(ChatMsg::PeerB(Reply::Hello(msg)))) => { // peer B has responded with hello
                             println!("< {} >", std::str::from_utf8(&msg).unwrap());
                         },
-                        Ok(ChatMsg::PeerB(Reply::Note(msg))) => {
+                        Some(Ok(ChatMsg::PeerB(Reply::Note(msg)))) => {
                             println!("P> {}", std::str::from_utf8(&msg).unwrap());
                         },
-                        Ok(_) => unimplemented!(),
-                        Err(x) => {
+                        Some(Ok(_)) => unimplemented!(),
+                        Some(Err(x)) => {
                             debug!("Peer Client Connection closing error: {:?}", x);
                             break;
                         },
+                        None => break, //unimplemented!(),
                     }
                 }
                 else => {
@@ -142,25 +154,27 @@ impl PeerWrite {
     }
 
     async fn handle_peer_write(&mut self) {
-        let mut fw = FramedWrite::new(self.tcp_write.take().unwrap(), ChatCodec);
-
         loop {
             // Read from channel, data received from command line
             if let Some(msg) = self.local_rx.recv().await {
                 match self.client_type {
                     PeerType::A => { // send back to server across tcp
+
+                        info!("handle_peer_write: peer type A {:?}", &msg);
+
+                        let mut fw = FramedWrite::new(self.tcp_write.as_mut().unwrap(), ChatCodec);
                         fw.send(msg).await.expect("Unable to write to server");
                     },
-                    PeerType::B => { // send back to local B server across msg channel 
+                    PeerType::B => { // send back to local B server across msg channel
+
+                        info!("handle_peer_write: peer type B {:?}", &msg);
+
                         match msg {
-                            // handle Leave msg
                             Ask::Note(m) => {
-                                self.server_tx.as_mut()
-                                    .map(|x| async { x.send(PeerMsgType::Note(m)).await.expect("Unable to tx")});
+                                self.server_tx.as_mut().unwrap().send(PeerMsgType::Note(m)).await.expect("Unable to tx");
                             },
                             Ask::Leave(m) => {
-                                self.server_tx.as_mut()
-                                    .map(|x| async { x.send(PeerMsgType::Leave(m)).await.expect("Unable to tx")});
+                                self.server_tx.as_mut().unwrap().send(PeerMsgType::Leave(m)).await.expect("Unable to tx");
                             },
                             _ => unimplemented!(),
                         }
@@ -211,7 +225,7 @@ impl PeerClient {
                 // split tcpstream so we can hand off to r & w tasks
                 let (client_read, client_write) = client.into_split();
 
-                let read = Some(PeerRead::new(Some(client_read), None, client_type));
+                let read = Some(PeerRead::new(Some(client_read), None));
                 let write = Some(PeerWrite::new(Some(client_write), local_rx, None, client_type));
 
                 Ok(PeerClient {read, write, local_tx: Some(local_tx)}) //, client_type})
@@ -219,7 +233,7 @@ impl PeerClient {
 
             // client is peer type B coupled with running peer type B server on the same node
             PeerType::B => {
-                let read = Some(PeerRead::new(None, client_rx, client_type));
+                let read = Some(PeerRead::new(None, client_rx));
                 let write = Some(PeerWrite::new(None, local_rx, server_tx, client_type));
 
                 Ok(PeerClient {read, write, local_tx: Some(local_tx)}) //, client_type})
