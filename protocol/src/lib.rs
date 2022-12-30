@@ -18,6 +18,7 @@ const REQ_FORKP: u8 = b'%';
 const REQ_HBEAT: u8 = b'!';
 
 const RESP: u8 = b'-';
+const RESP_NAMEACK: u8 = b'|';
 const RESP_USERMSG: u8 = b'*';
 const RESP_NOTIF: u8 = b'@';
 const RESP_FORKACK: u8 = b'^';
@@ -61,7 +62,8 @@ pub enum Response { // b'-'
         id: u16,
         msg: Vec<u8>, // support a single line for now -- not multi-line
     },
-    Notification( // b'@', use for join and leave events, user lists etc..
+    JoinNameAck(Vec<u8>), // b'|'
+    Notification( // b'@', use for leave events, user lists etc..
         Vec<u8>
     ),
     ForkPeerAckA { // b'^'   same type this used for decode
@@ -132,6 +134,10 @@ impl Decoder for ChatCodec {
             RESP => {
                 src.advance(1);
                 match src.get_u8() {
+                    RESP_NAMEACK => {
+                        msg = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::JoinNameAck(msg))))
+                    },
                     RESP_USERMSG => { // todo need to handle case where we don't have enough bytes read..
                         id = src.get_u16(); // id field
                         msg = decode_vec(src)?;
@@ -240,6 +246,11 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_USERMSG);
                 dst.put_u16(id);
+                encode_vec(msg, dst);
+            },
+            Response::JoinNameAck(msg) => {
+                dst.put_u8(RESP);
+                dst.put_u8(RESP_NAMEACK);
                 encode_vec(msg, dst);
             },
             Response::Notification(msg) => {

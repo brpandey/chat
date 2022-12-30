@@ -22,14 +22,18 @@ impl ChannelReceiver {
                     debug!("Local channel msg received {:?}", &message);
 
                     match message {
-                        MsgType::Joined(cid, msg) => {
+                        MsgType::JoinedOthers(cid, msg) => {
                             // broadcast join msg to all except for cid, then
                             // trigger 'current users' message as well for cid
                             response = Response::Notification(msg);
                             outgoing.broadcast_except(cid, response).await;
                             local_tx.send(MsgType::Users(cid)).await.expect("Unable to tx");
                         },
-                        MsgType::JoinedAck(cid, msg) => {
+                        MsgType::JoinedAck(cid, name) => {
+                            response = Response::JoinNameAck(name);
+                            outgoing.send(cid, response).await;
+                        },
+                        MsgType::JoinedAckUpdated(cid, msg) => {
                             response = Response::Notification(msg);
                             outgoing.send(cid, response).await;
                         },

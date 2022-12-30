@@ -13,8 +13,9 @@ pub type RegistryEntry = (String, String, tcp::OwnedWriteHalf);
 
 #[derive(Debug)]
 pub enum MsgType {
-    Joined(u16, Vec<u8>),
     JoinedAck(u16, Vec<u8>),
+    JoinedAckUpdated(u16, Vec<u8>),
+    JoinedOthers(u16, Vec<u8>),
     Message(u16, Vec<u8>),
     MessageSingle(u16, Vec<u8>),
     Exited(Vec<u8>),

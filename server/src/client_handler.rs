@@ -16,8 +16,8 @@ use protocol::{ChatMsg, ChatCodec, Request};
 use crate::server_types::{MsgType, Registry};
 use crate::names::NamesShared;
 
-const USER_JOINED: &str = "User {} joined";
-const USER_JOINED_ACK: &str = "You have successfully joined as {}";
+const USER_JOINED_OTHERS: &str = "User {} joined";
+const USER_JOINED_ACK_UPDATED: &str = "You have successfully joined as {}";
 const USER_LEFT: &str = "User {} has left";
 
 // Handles server communication from client
@@ -65,6 +65,7 @@ impl ClientHandler {
         info!("client_id is {}", self.client_id);
 
         let addr_str: String;
+        let mut updated = false;
 
         // Acquire write lock guard, insert new chat name, using new name if there was a collision
         {
@@ -73,14 +74,7 @@ impl ClientHandler {
             let addr_bytes = addr_str.as_bytes().to_vec();
             if !lg.insert(name.clone(), (self.client_id, addr_bytes)) { // if collision happened, grab modified handle name
                 name = lg.last_collision().unwrap(); // retrieve updated name, has to be not None
-
-                // send msg back acknowledging user joined with updated chat name
-                let join_msg = USER_JOINED_ACK.replace("{}", &name);
-                client_msg = MsgType::JoinedAck(self.client_id, join_msg.into_bytes());
-
-                // notify others of new join
-                self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
-                    .expect("Unable to tx");
+                updated = true;
             }
         }
 
@@ -90,12 +84,28 @@ impl ClientHandler {
             sc.entry(self.client_id).or_insert((addr_str, name.clone(), tcp_write));
         }
 
-        let join_msg = USER_JOINED.replace("{}", &name);
-        client_msg = MsgType::Joined(self.client_id, join_msg.into_bytes());
-
-        // notify others of new join
+        // notify client specifically of successful join (not as a notification)
+        client_msg = MsgType::JoinedAck(self.client_id, name.clone().into_bytes());
         self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
             .expect("Unable to tx");
+
+        // notify others of new join (not including client)
+        let mut join_msg = USER_JOINED_OTHERS.replace("{}", &name);
+        client_msg = MsgType::JoinedOthers(self.client_id, join_msg.into_bytes());
+        self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
+            .expect("Unable to tx");
+
+        // If name updated send client back a specific message
+        if updated {
+            // send msg back acknowledging user joined with updated chat name
+            join_msg = USER_JOINED_ACK_UPDATED.replace("{}", &name);
+            client_msg = MsgType::JoinedAckUpdated(self.client_id, join_msg.into_bytes());
+
+            // notify others of new join
+            self.task_tx.send_timeout(client_msg, Duration::from_millis(75)).await
+                .expect("Unable to tx");
+        }
+
 
         self.set_msg_prompt(name.as_bytes().to_vec());
 

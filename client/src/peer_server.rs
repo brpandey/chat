@@ -13,7 +13,7 @@ use tracing::info;
 pub struct PeerServerListener;
 
 impl PeerServerListener {
-    pub fn spawn_accept(addr: String) {
+    pub fn spawn_accept(addr: String, name: String) {
         let _h = tokio::spawn(async move {
 
             let result = TcpListener::bind(addr).await;
@@ -36,9 +36,12 @@ impl PeerServerListener {
                     let (client_tx, client_rx) = mpsc::channel::<PeerMsgType>(64);
                     let (server_tx, server_rx) = mpsc::channel::<PeerMsgType>(64);
 
-                    PeerClient::spawn_b(client_rx, server_tx);
+                    // For each new peer that wants to connect with this node e.g. N1
+                    // spawn a separate peer client of type B that locally communicates with peer server
+                    // of type B
+                    PeerClient::spawn_b(client_rx, server_tx, name.clone());
 
-                    let mut handler = PeerServerHandler::new(tcp_read, tcp_write, client_tx, server_rx);
+                    let mut handler = PeerServerHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
                     handler.spawn().await;
                 } else {
                     break;

@@ -22,12 +22,12 @@ struct PeerServerReader {
     tcp_read: Option<tcp::OwnedReadHalf>,
     local_tx: Sender<PeerMsgType>,
     peer_b_client_tx: Sender<PeerMsgType>,
+    name: String,
 }
 
 struct PeerServerWriter {
     tcp_write: Option<tcp::OwnedWriteHalf>,
     local_rx: Receiver<PeerMsgType>,
-    //    msg_prefix: Vec<u8>,
     peer_b_server_rx: Receiver<PeerMsgType>,
 }
 
@@ -36,7 +36,9 @@ const BOUNDED_CHANNEL_SIZE: usize = 64;
 impl PeerServerHandler {
     pub fn new(tcp_read: tcp::OwnedReadHalf, tcp_write: tcp::OwnedWriteHalf,
                peer_b_client_tx: Sender<PeerMsgType>,
-               peer_b_server_rx: Receiver<PeerMsgType>) -> Self {
+               peer_b_server_rx: Receiver<PeerMsgType>,
+               name: String
+    ) -> Self {
 
         // Setup server local msg passing channel
         let (local_tx, local_rx) = mpsc::channel::<PeerMsgType>(BOUNDED_CHANNEL_SIZE);
@@ -46,11 +48,11 @@ impl PeerServerHandler {
                 tcp_read: Some(tcp_read),
                 local_tx,
                 peer_b_client_tx,
+                name,
             }),
             writer: Some(PeerServerWriter {
                 tcp_write: Some(tcp_write),
                 local_rx,
-  //              msg_prefix: vec![], // initialized after register()
                 peer_b_server_rx,
             })
         }
@@ -66,7 +68,7 @@ impl PeerServerHandler {
         });
 
         // Spawn tokio task to handle server socket writes to clients
-        let write = tokio::spawn(async move {
+        let _write = tokio::spawn(async move {
             w.handle_write().await;
         });
 
@@ -96,7 +98,7 @@ impl PeerServerReader {
                         self.peer_b_client_tx.send(PeerMsgType::Hello(hello_msg)).await
                                             .expect("Unable to tx");
                         // send response msg back to peer a with peer b's name
-                        self.local_tx.send(PeerMsgType::Hello("peer b".as_bytes().to_vec())).await // send back peer b server's name
+                        self.local_tx.send(PeerMsgType::Hello(self.name.clone().into_bytes())).await // send back peer b server's name
                             .expect("Unable to tx");
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {
@@ -185,7 +187,8 @@ impl PeerServerWriter {
 }
 
 pub fn split_msg(msg: Vec<u8>) -> Vec<u8> {
-    let msg_prefix = "Peer B says:".as_bytes().to_vec();
+//    let msg_prefix = "Peer B says:".as_bytes().to_vec();
+    let msg_prefix = vec![];
 
     for mut line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
         if line.is_empty() { continue }

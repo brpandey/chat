@@ -42,12 +42,9 @@ async fn main() -> io::Result<()> {
 
     info!("Client peer server starting {:?}", &PEER_SERVER);
 
-    // start up peer server for clients that connect to this node for
-    // peer to peer chat.
-    PeerServerListener::spawn_accept(PEER_SERVER.to_owned());
-
-
 //    let server_alive = Arc::new(AtomicBool::new(true));
+//    let server_alive_ref1 = Arc::clone(&server_alive);
+//    let server_alive_ref2 = Arc::clone(&server_alive);
 
     // split tcpstream so we can hand off to r & w tasks
     let (client_read, client_write) = client.into_split();
@@ -61,10 +58,17 @@ async fn main() -> io::Result<()> {
         error!("Unable to retrieve user chat name");
     }
 
-//    let server_alive_ref1 = Arc::clone(&server_alive);
-//    let server_alive_ref2 = Arc::clone(&server_alive);
-
+    let mut client_name = String::new();
     let mut fr = FramedRead::new(client_read, ChatCodec);
+
+    if let Some(Ok(ChatMsg::Server(Response::JoinNameAck(name_bytes)))) = fr.next().await {
+        println!(">>> Registered as name: {}", std::str::from_utf8(&name_bytes).unwrap());
+        client_name = String::from_utf8(name_bytes).unwrap_or_default();
+    }
+
+    // start up peer server for clients that connect to this node for
+    // peer to peer chat.
+    PeerServerListener::spawn_accept(PEER_SERVER.to_owned(), client_name.clone());
 
     // Spawn client tcp read tokio task, to read back main server msgs
     let server_read_handle = tokio::spawn(async move {
@@ -92,8 +96,8 @@ async fn main() -> io::Result<()> {
 
                         // drop current port of addr and add PEER_SERVER_PORT to addr
                         addr.set_port(PEER_SERVER_PORT);
-                        let addr_str = format!("{}", &addr);
-                        PeerClient::spawn_a(addr_str.to_owned());
+                        let addr_string = format!("{}", &addr);
+                        PeerClient::spawn_a(addr_string, client_name.clone());
 
                         // should probably set some cond var that blocks other threads from reading from stdin
                         // until user explicitly switches to client -> server mode

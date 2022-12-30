@@ -5,7 +5,6 @@ use tokio_util::codec::{LinesCodec, FramedRead, FramedWrite};
 use tokio::net::TcpStream;
 use tokio::io::{self}; //, empty, sink}; 
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
-
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 
 use tracing::{info, debug, error};
@@ -102,7 +101,6 @@ impl PeerRead {
                 // Type A code
                 // Read lines from server via tcp if we are peer A in the above scenario
                 Some(msg_a) = read_a => {
-//                Some(msg_a) = fr.next() => {
                     debug!("received Y tcp peer server value is {:?}", msg_a);
 
                     match msg_a {
@@ -180,6 +178,9 @@ impl PeerWrite {
                         }
                     }
                 }
+            } else {
+                info!("peer write terminating, no more channel senders");
+                break;
             }
         }
     }
@@ -187,24 +188,24 @@ impl PeerWrite {
 
 //#[derive(Debug)]
 pub struct PeerClient {
-//    name: Vec<u8>,
     read: Option<PeerRead>,
     write: Option<PeerWrite>,
     local_tx: Option<Sender<Ask>>,
+    name: String,
 }
 
 impl PeerClient {
-    pub fn spawn_a(server: String) {
+    pub fn spawn_a(server: String, name: String) {
         let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::setup(Some(server), None, None, PeerType::A).await {
+            if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
                 client.run().await;
             }
         });
     }
 
-    pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>) {
+    pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>, name: String) {
         let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::setup(None, Some(client_rx), Some(server_tx), PeerType::B).await {
+            if let Ok(mut client) = PeerClient::setup(None, Some(client_rx), Some(server_tx), name, PeerType::B).await {
                 client.run().await;
             }
         });
@@ -212,6 +213,7 @@ impl PeerClient {
 
     pub async fn setup(server: Option<String>,
                        client_rx: Option<Receiver<PeerMsgType>>, server_tx: Option<Sender<PeerMsgType>>,
+                       name: String,
                        client_type: PeerType) -> io::Result<PeerClient> {
 
         let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
@@ -228,7 +230,7 @@ impl PeerClient {
                 let read = Some(PeerRead::new(Some(client_read), None));
                 let write = Some(PeerWrite::new(Some(client_write), local_rx, None, client_type));
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx)}) //, client_type})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), name}) //, client_type})
             },
 
             // client is peer type B coupled with running peer type B server on the same node
@@ -236,7 +238,7 @@ impl PeerClient {
                 let read = Some(PeerRead::new(None, client_rx));
                 let write = Some(PeerWrite::new(None, local_rx, server_tx, client_type));
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx)}) //, client_type})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), name}) //, client_type})
             }
         }
     }
@@ -254,12 +256,13 @@ impl PeerClient {
             write.handle_peer_write().await;
         });
 
+        let name = self.name.clone();
         // Use current thread to loop and grab data from command line
         let _cmd_line_handle = tokio::spawn(async move {
             loop {
                 debug!("task peer cmd line read: input looping");
 
-                if let Some(msg) = read_async_user_input().await {
+                if let Some(msg) = read_async_user_input(&name).await {
                     local_tx.send(msg).await.expect("xxx Unable to tx");
                 } else {
                     break;
@@ -271,7 +274,7 @@ impl PeerClient {
     }
 }
 
-async fn read_async_user_input() -> Option<Ask> {
+async fn read_async_user_input(name: &str) -> Option<Ask> {
     let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
 
     // need to implement some sort of lock on stdin
@@ -282,14 +285,17 @@ async fn read_async_user_input() -> Option<Ask> {
         // handle user input-ed commands
         match line.as_str() {
             "\\leave" => {
-                info!("Private session ended by user...");
-                return Some(Ask::Leave("ghost".as_bytes().to_vec()));
+                info!("Private session ended by user {}", name);
+                return Some(Ask::Leave(name.as_bytes().to_vec()));
             },
             _ => (),
         }
 
         // if no commands, split up user input
         let mut total = vec![];
+
+        let msg_prefix = format!("<{}> ", name);
+        total.push(msg_prefix.into_bytes());
         let mut citer = line.as_bytes().chunks(USER_LINES);
 
         while let Some(c) = citer.next() {
