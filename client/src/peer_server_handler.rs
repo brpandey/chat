@@ -103,6 +103,10 @@ impl PeerServerReader {
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {
                         self.process_disconnect(name).await;
+                        // send local msg 
+                        self.local_tx.send(PeerMsgType::Leave(vec![])).await // send back peer b server's name
+                            .expect("Unable to tx");
+
                         break;
                     },
                     Ok(ChatMsg::PeerA(Ask::Note(msg))) => {
@@ -153,7 +157,6 @@ impl PeerServerWriter {
             select! {
             // Read from local read channel, data received from tcp client peer a
                 Some(msg_a) = self.local_rx.recv() => {
-
                     info!("peer server -- type a - received in its server msg queue: {:?}", &msg_a);
 
                     match msg_a {
@@ -161,6 +164,7 @@ impl PeerServerWriter {
                             reply = Reply::Hello(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
+                        PeerMsgType::Leave(_) => return,
                         _ => unimplemented!(),
                     }
                 }
@@ -168,10 +172,11 @@ impl PeerServerWriter {
                     info!("peer server -- type b - received in its server msg queue: {:?}", &msg_b);
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
-                        PeerMsgType::Leave(m) => { // eventually handle case where peer b wants to leave
+                        PeerMsgType::Leave(m) => { // case where peer b (as opposed to peer a) wants to leave
                             info!("reply back to client with Leave ");
                             reply = Reply::Leave(m);
-                            fw.send(reply).await.expect("Unable to write to server")
+                            fw.send(reply).await.expect("Unable to write to server");
+                            return
                         },
                         PeerMsgType::Note(m) => {
                             info!("reply back to client with Note ");

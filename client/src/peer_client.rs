@@ -1,6 +1,9 @@
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{self, Sender, Receiver};
+use tokio::sync::broadcast::{self};
+use tokio::sync::broadcast::Sender as BSender;
+use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio_util::codec::{LinesCodec, FramedRead, FramedWrite};
 use tokio::net::TcpStream;
 use tokio::io::{self}; //, empty, sink}; 
@@ -13,6 +16,7 @@ use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 
 use crate::peer_types::PeerMsgType;
 
+const SHUTDOWN: u8 = 1;
 const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
@@ -27,20 +31,23 @@ pub enum PeerType {
 pub struct PeerRead {
     tcp_read: Option<tcp::OwnedReadHalf>, // Some, use if type A
     client_rx: Option<Receiver<PeerMsgType>>, // Some, use if type B
+    shutdown_tx: BSender<u8>,
 }
 
 impl PeerRead {
     pub fn new(tcp_read: Option<tcp::OwnedReadHalf>,
-               client_rx: Option<Receiver<PeerMsgType>>) -> Self {
+               client_rx: Option<Receiver<PeerMsgType>>,
+               shutdown_tx: BSender<u8>
+    ) -> Self {
         Self {
             tcp_read,
             client_rx,
+            shutdown_tx
         }
     }
 
     // Loop to handle ongoing client msgs to server
     async fn handle_peer_read(&mut self) {
-
         loop {
             debug!("task A: listening to peer server replies...");
 
@@ -54,7 +61,6 @@ impl PeerRead {
                     None => None,
                 }
             };
-
 
             // Wrap handling of client_rx msg queue stream into another future to get
             // around weird tokio::select behaviour of still evaluating branch expression
@@ -86,7 +92,8 @@ impl PeerRead {
                     match msg_b {
                         // if peer A wants to leave then terminate this peer 
                         Some(PeerMsgType::Leave(name)) => {
-                            println!("< {} >", std::str::from_utf8(&name).unwrap());
+                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap());
+                            self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
                             return
                         },
                         Some(PeerMsgType::Hello(msg)) => {
@@ -105,7 +112,8 @@ impl PeerRead {
 
                     match msg_a {
                         Some(Ok(ChatMsg::PeerB(Reply::Leave(msg)))) => { // peer B has left, terminate this peer
-                            println!("< {} >", std::str::from_utf8(&msg).unwrap());
+                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&msg).unwrap());
+                            self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
                             return
                         },
                         Some(Ok(ChatMsg::PeerB(Reply::Hello(msg)))) => { // peer B has responded with hello
@@ -136,51 +144,52 @@ pub struct PeerWrite {
     tcp_write: Option<tcp::OwnedWriteHalf>,  // Some use if type A
     local_rx: Receiver<Ask>,
     server_tx: Option<Sender<PeerMsgType>>,  // Some use if type B
+    shutdown_rx: BReceiver<u8>,
     client_type: PeerType,
 }
 
 impl PeerWrite {
     pub fn new(tcp_write: Option<tcp::OwnedWriteHalf>,
                local_rx: Receiver<Ask>, server_tx: Option<Sender<PeerMsgType>>,
+               shutdown_rx: BReceiver<u8>,
                client_type: PeerType) -> Self {
         Self {
             tcp_write,
             local_rx,
             server_tx,
+            shutdown_rx,
             client_type,
         }
     }
 
     async fn handle_peer_write(&mut self) {
         loop {
-            // Read from channel, data received from command line
-            if let Some(msg) = self.local_rx.recv().await {
-                match self.client_type {
-                    PeerType::A => { // send back to server across tcp
-
-                        info!("handle_peer_write: peer type A {:?}", &msg);
-
-                        let mut fw = FramedWrite::new(self.tcp_write.as_mut().unwrap(), ChatCodec);
-                        fw.send(msg).await.expect("Unable to write to server");
-                    },
-                    PeerType::B => { // send back to local B server across msg channel
-
-                        info!("handle_peer_write: peer type B {:?}", &msg);
-
-                        match msg {
-                            Ask::Note(m) => {
-                                self.server_tx.as_mut().unwrap().send(PeerMsgType::Note(m)).await.expect("Unable to tx");
-                            },
-                            Ask::Leave(m) => {
-                                self.server_tx.as_mut().unwrap().send(PeerMsgType::Leave(m)).await.expect("Unable to tx");
-                            },
-                            _ => unimplemented!(),
+            select! {
+                // Read from channel, data received from command line
+                Some(msg) = self.local_rx.recv() => {
+                    match self.client_type {
+                        PeerType::A => { // send back to server across tcp
+                            info!("handle_peer_write: peer type A {:?}", &msg);
+                            let mut fw = FramedWrite::new(self.tcp_write.as_mut().unwrap(), ChatCodec);
+                            fw.send(msg).await.expect("Unable to write to server");
+                        },
+                        PeerType::B => { // send back to local B server across msg channel
+                            info!("handle_peer_write: peer type B {:?}", &msg);
+                            match msg {
+                                Ask::Note(m) => {
+                                    self.server_tx.as_mut().unwrap().send(PeerMsgType::Note(m)).await.expect("Unable to tx");
+                                },
+                                Ask::Leave(m) => {
+                                    self.server_tx.as_mut().unwrap().send(PeerMsgType::Leave(m)).await.expect("Unable to tx");
+                                },
+                                _ => unimplemented!(),
+                            }
                         }
                     }
                 }
-            } else {
-                info!("peer write terminating, no more channel senders");
-                break;
+                _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
+                    return
+                }
             }
         }
     }
@@ -191,6 +200,7 @@ pub struct PeerClient {
     read: Option<PeerRead>,
     write: Option<PeerWrite>,
     local_tx: Option<Sender<Ask>>,
+    shutdown_rx: Option<BReceiver<u8>>,
     name: String,
 }
 
@@ -216,7 +226,12 @@ impl PeerClient {
                        name: String,
                        client_type: PeerType) -> io::Result<PeerClient> {
 
+        // for communication between cmd line read and peer write
         let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
+
+        // for all peer client tasks shutdown (e.g. user has disconnected or peer user has disconnected)
+        let (sd_tx, sd_rx1) = broadcast::channel(16);
+        let sd_rx2 = sd_tx.subscribe();
 
         match client_type {
             // client is peer type A which initiates a reaquest to an already running peer B
@@ -227,18 +242,18 @@ impl PeerClient {
                 // split tcpstream so we can hand off to r & w tasks
                 let (client_read, client_write) = client.into_split();
 
-                let read = Some(PeerRead::new(Some(client_read), None));
-                let write = Some(PeerWrite::new(Some(client_write), local_rx, None, client_type));
+                let read = Some(PeerRead::new(Some(client_read), None, sd_tx));
+                let write = Some(PeerWrite::new(Some(client_write), local_rx, None, sd_rx1, client_type));
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx), name}) //, client_type})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name}) //, client_type})
             },
 
             // client is peer type B coupled with running peer type B server on the same node
             PeerType::B => {
-                let read = Some(PeerRead::new(None, client_rx));
-                let write = Some(PeerWrite::new(None, local_rx, server_tx, client_type));
+                let read = Some(PeerRead::new(None, client_rx, sd_tx));
+                let write = Some(PeerWrite::new(None, local_rx, server_tx, sd_rx1, client_type));
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx), name}) //, client_type})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name})
             }
         }
     }
@@ -247,8 +262,9 @@ impl PeerClient {
         let mut read = self.read.take().unwrap();
         let mut write = self.write.take().unwrap();
         let local_tx = self.local_tx.take().unwrap();
+        let mut shutdown_rx = self.shutdown_rx.take().unwrap();
 
-        let peer_server_read_handle = tokio::spawn(async move {
+        let _peer_server_read_handle = tokio::spawn(async move {
             read.handle_peer_read().await;
         });
 
@@ -262,15 +278,18 @@ impl PeerClient {
             loop {
                 debug!("task peer cmd line read: input looping");
 
-                if let Some(msg) = read_async_user_input(&name).await {
-                    local_tx.send(msg).await.expect("xxx Unable to tx");
-                } else {
-                    break;
+                select! {
+                    Some(msg) = read_async_user_input(&name) => {
+                        local_tx.send(msg).await.expect("xxx Unable to tx");
+                    }
+                    _ = shutdown_rx.recv() => { // exit task if shutdown received
+                        return
+                    }
                 }
             }
         });
 
-        peer_server_read_handle.await.unwrap();
+//        peer_server_read_handle.await.unwrap();
     }
 }
 
