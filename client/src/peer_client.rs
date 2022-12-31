@@ -20,6 +20,8 @@ const SHUTDOWN: u8 = 1;
 const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
+const PEER_HELLO: &str = "Peer {} is ready to chat";
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PeerType {
     A,  // peer client node
@@ -92,15 +94,15 @@ impl PeerRead {
                     match msg_b {
                         // if peer A wants to leave then terminate this peer 
                         Some(PeerMsgType::Leave(name)) => {
-                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap());
+                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap_or_default());
                             self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
                             return
                         },
                         Some(PeerMsgType::Hello(msg)) => {
-                            println!("< {} >", std::str::from_utf8(&msg).unwrap());
+                            println!("< {} >", std::str::from_utf8(&msg).unwrap_or_default());
                         },
                         Some(PeerMsgType::Note(msg)) => {
-                            println!("P> {}", std::str::from_utf8(&msg).unwrap());
+                            println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
                         },
                         _ => unimplemented!(),
                     }
@@ -112,15 +114,17 @@ impl PeerRead {
 
                     match msg_a {
                         Some(Ok(ChatMsg::PeerB(Reply::Leave(msg)))) => { // peer B has left, terminate this peer
-                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&msg).unwrap());
+                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&msg).unwrap_or_default());
                             self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
                             return
                         },
-                        Some(Ok(ChatMsg::PeerB(Reply::Hello(msg)))) => { // peer B has responded with hello
-                            println!("< {} >", std::str::from_utf8(&msg).unwrap());
+                        Some(Ok(ChatMsg::PeerB(Reply::Hello(name)))) => { // peer B has responded with hello
+                            let name_str = std::str::from_utf8(&name).unwrap_or_default();
+                            let hello_msg = PEER_HELLO.replace("{}", name_str).into_bytes();
+                            println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
                         },
                         Some(Ok(ChatMsg::PeerB(Reply::Note(msg)))) => {
-                            println!("P> {}", std::str::from_utf8(&msg).unwrap());
+                            println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
                         },
                         Some(Ok(_)) => unimplemented!(),
                         Some(Err(x)) => {
@@ -208,6 +212,8 @@ impl PeerClient {
     pub fn spawn_a(server: String, name: String) {
         let _h = tokio::spawn(async move {
             if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
+                // peer A initiates hello since it initiated the session!
+                client.send_hello().await;
                 client.run().await;
             }
         });
@@ -258,10 +264,15 @@ impl PeerClient {
         }
     }
 
-    pub async fn run(&mut self) {
+    async fn send_hello(&mut self) {
+        let msg = Ask::Hello(self.name.clone().into_bytes());
+        self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
+    }
+
+    async fn run(&mut self) {
         let mut read = self.read.take().unwrap();
         let mut write = self.write.take().unwrap();
-        let local_tx = self.local_tx.take().unwrap();
+        let local_tx = self.local_tx.clone().unwrap();
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
 
         let _peer_server_read_handle = tokio::spawn(async move {
