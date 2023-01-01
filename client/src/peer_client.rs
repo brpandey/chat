@@ -209,6 +209,15 @@ pub struct PeerClient {
 }
 
 impl PeerClient {
+
+    pub async fn nospawn_a(server: String, name: String) {
+        if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
+            // peer A initiates hello since it initiated the session!
+            client.send_hello().await;
+            client.run().await;
+        }
+    }
+
     pub fn spawn_a(server: String, name: String) {
         let _h = tokio::spawn(async move {
             if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
@@ -218,6 +227,7 @@ impl PeerClient {
             }
         });
     }
+
 
     pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>, name: String) {
         let _h = tokio::spawn(async move {
@@ -275,7 +285,7 @@ impl PeerClient {
         let local_tx = self.local_tx.clone().unwrap();
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
 
-        let _peer_server_read_handle = tokio::spawn(async move {
+        let peer_server_read_handle = tokio::spawn(async move {
             read.handle_peer_read().await;
         });
 
@@ -285,7 +295,7 @@ impl PeerClient {
 
         let name = self.name.clone();
         // Use current thread to loop and grab data from command line
-        let _cmd_line_handle = tokio::spawn(async move {
+        let cmd_line_handle = tokio::spawn(async move {
             loop {
                 debug!("task peer cmd line read: input looping");
 
@@ -300,7 +310,14 @@ impl PeerClient {
             }
         });
 
-//        peer_server_read_handle.await.unwrap();
+        info!("gonzo A");
+        peer_server_read_handle.await.unwrap();
+
+        info!("gonzo B");
+
+        cmd_line_handle.await.unwrap();
+
+        info!("gonzo C");
     }
 }
 

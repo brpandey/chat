@@ -1,14 +1,18 @@
 use std::io as stdio;
 use std::io::{stdout, Write};
+use std::sync::Arc;
 
 use tokio::select;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex, broadcast};
+
 use tokio::io::{self}; //, AsyncWriteExt}; //, AsyncReadExt};
 
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
+
+use tokio::task::JoinSet;
 
 use tracing_subscriber::fmt;
 use tracing::{info, debug, error, Level};
@@ -18,12 +22,11 @@ use protocol::{ChatMsg, ChatCodec, Request, Response};
 use client::peer_client::PeerClient;
 use client::peer_server::PeerServerListener;
 
+const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
 const SERVER: &str = "127.0.0.1:43210";
 const PEER_SERVER: &str = "127.0.0.1:43310";
 const PEER_SERVER_PORT: u16 = 43310;
-
-const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
-
+const SHUTDOWN: u8 = 1;
 const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
@@ -70,75 +73,115 @@ async fn main() -> io::Result<()> {
     // peer to peer chat.
     PeerServerListener::spawn_accept(PEER_SERVER.to_owned(), client_name.clone());
 
+    let peer_clients = Arc::new(Mutex::new(JoinSet::new()));
+    let set = peer_clients.clone(); 
+
+    let (shutdown_tx1, mut shutdown_rx1) = broadcast::channel(16);
+    let mut shutdown_rx2 = shutdown_tx1.subscribe();
+    let mut shutdown_rx3 = shutdown_tx1.subscribe();
+    let mut shutdown_rx4 = shutdown_tx1.subscribe();
+
+    let shutdown_tx2 = shutdown_tx1.clone();
+    let shutdown_tx3 = shutdown_tx1.clone();
+
     // Spawn client tcp read tokio task, to read back main server msgs
-    let server_read_handle = tokio::spawn(async move {
+    let _server_read_handle = tokio::spawn(async move {
         loop {
             debug!("task A: listening to server replies...");
 
-            // Read lines from server
-            if let Some(value) = fr.next().await {
-                debug!("received server value is {:?}", value);
+            select! {
+                // Read lines from server
+                Some(value) = fr.next() => {
+                    debug!("received server value is {:?}", value);
 
-                match value {
-                    Ok(ChatMsg::Server(Response::UserMessage{id, msg})) => {
-                        println!("> {} {}", id, std::str::from_utf8(&msg).unwrap());
-                    },
-                    Ok(ChatMsg::Server(Response::Notification(line))) => {
-                        println!(">>> {}", std::str::from_utf8(&line).unwrap());
-                    },
-                    Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, mut addr})) => {
-                        println!(">>> About to fork private session with {} {}", id, std::str::from_utf8(&name).unwrap());
+                    match value {
+                        Ok(ChatMsg::Server(Response::UserMessage{id, msg})) => {
+                            println!("> {} {}", id, std::str::from_utf8(&msg).unwrap());
+                        },
+                        Ok(ChatMsg::Server(Response::Notification(line))) => {
+                            println!(">>> {}", std::str::from_utf8(&line).unwrap());
+                        },
+                        Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, mut addr})) => {
+                            println!(">>> About to fork private session with {} {}", id, std::str::from_utf8(&name).unwrap());
 
-                        // spawn tokio task to send client requests to peer server address
-                        // responding to server requests will take a lower priority
-                        // unless the user explicitly switches over to communicating with the server from
-                        // peer to peer mode
+                            // spawn tokio task to send client requests to peer server address
+                            // responding to server requests will take a lower priority
+                            // unless the user explicitly switches over to communicating with the server from
+                            // peer to peer mode
 
-                        // drop current port of addr and add PEER_SERVER_PORT to addr
-                        addr.set_port(PEER_SERVER_PORT);
-                        let addr_string = format!("{}", &addr);
-                        PeerClient::spawn_a(addr_string, client_name.clone());
+                            // drop current port of addr and add PEER_SERVER_PORT to addr
+                            addr.set_port(PEER_SERVER_PORT);
+                            let addr_string = format!("{}", &addr);
+                            set.lock().await.spawn(PeerClient::nospawn_a(addr_string, client_name.clone()));
 
-                        // should probably set some cond var that blocks other threads from reading from stdin
-                        // until user explicitly switches to client -> server mode
-                    },
-                    Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
-                        println!(">>> Unable to fork into private session as peer {} unavailable",
-                                 std::str::from_utf8(&name).unwrap());
-                    },
-                    Ok(_) => unimplemented!(),
-                    Err(x) => {
-                        debug!("Client Connection closing error: {:?}", x);
-                        break;
-                    },
+                            // should probably set some cond var that blocks other threads from reading from stdin
+                            // until user explicitly switches to client -> server mode
+                        },
+                        Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
+                            println!(">>> Unable to fork into private session as peer {} unavailable",
+                                     std::str::from_utf8(&name).unwrap());
+                        },
+                        Ok(_) => unimplemented!(),
+                        Err(x) => {
+                            debug!("Client Connection closing error: {:?}", x);
+                            break;
+                        }
+                    }
+                } // exit task if shutdown received
+   /*             _ = shutdown_rx1.recv() => {
+                    info!("server_read_handle received shutdown, returning!");
+                    return;
                 }
-            } else {
-                info!("Server Remote has closed");
-                break;
-            }
+   */             else => {
+                    info!("Server Remote has closed");
+                    info!("sending shutdown msg A");
+                    shutdown_tx1.send(SHUTDOWN).expect("Unable to send shutdown");
+                    break;
+                }
+            };
+        //        server_alive_ref1.swap(false, Ordering::Relaxed);
         }
-//        server_alive_ref1.swap(false, Ordering::Relaxed);
     });
 
-
     // Spawn client tcp write tokio task, to send data to server
-    let tcp_write_handle = tokio::spawn(async move {
+    let _tcp_write_handle = tokio::spawn(async move {
         loop {
-            // Read from channel, data received from command line
-            if let Some(msg) = local_rx.recv().await {
-                fw.send(msg).await.expect("Unable to write to server");
+            select! {
+                // Read from channel, data received from command line
+                Some(msg) = local_rx.recv() => {
+                    fw.send(msg).await.expect("Unable to write to server");
+                }
+                _ = shutdown_rx2.recv() => {
+                    info!("tcp_write_handle received shutdown, returning!");
+                    return;  // exit task if shutdown received
+                }
+ /*               else => {
+                    shutdown_tx2.send(SHUTDOWN).expect("Unable to send shutdown");
+                    info!("sending shutdown msg B");
+                    break;
+                }
+                */
             }
         }
     });
 
     // Use current thread to loop and grab data from command line
-    let cmd_line_handle = tokio::spawn(async move {
+    let _cmd_line_handle = tokio::spawn(async move {
         loop {
             debug!("task C: cmd line input looping");
-            if let Ok(Some(msg)) = read_async_user_input().await {
-                local_tx.send(msg).await.expect("xxx Unable to tx");
-            } else {
-                break;
+            select! {
+                Ok(Some(msg)) = read_async_user_input() => {
+                    local_tx.send(msg).await.expect("xxx Unable to tx");
+                }
+                _ = shutdown_rx3.recv() => {
+                    info!("cmd_line_handle received shutdown, returning!");
+                    break; // exit task if shutdown received
+                }
+                else => {
+                    shutdown_tx3.send(SHUTDOWN).expect("Unable to send shutdown");
+                    info!("sending shutdown msg C");
+                    break;
+                }
             }
 
             /*
@@ -152,9 +195,20 @@ async fn main() -> io::Result<()> {
         }
     });
 
-    // Note: use try_join() and all the tasks should be async functions
+    loop {
+        select! {
+            _ = shutdown_rx4.recv() => { // exit task if shutdown received
+                info!("received final shutdown");
+                break;
+            }
+        };
+    }
+
+    /*
+
     select! {
-        _ = server_read_handle => {
+        _ = server_read_handle => { // fires as soon as future completes
+      //      tcp_write_handle.abort();
             println!("X");
         }
         _ = cmd_line_handle => {
@@ -162,7 +216,18 @@ async fn main() -> io::Result<()> {
         }
     }
 
-    tcp_write_handle.abort();
+    */
+
+    // consume arc and lock
+    let mut clients = Arc::try_unwrap(peer_clients).unwrap().into_inner();
+
+    info!("clients are {:?}", clients);
+
+    while let Some(res) = clients.join_next().await {
+        info!("peer client completed {:?}", res);
+    }
+
+    info!("waka waka!");
 
     Ok(())
 }

@@ -186,6 +186,10 @@ impl PeerServerWriter {
                         _ => unimplemented!(),
                     }
                 }
+                else => {
+                    info!("all branches are disabled, exiting");
+                    return
+                }
             }
         }
     }
