@@ -210,12 +210,14 @@ pub struct PeerClient {
 
 impl PeerClient {
 
-    pub async fn nospawn_a(server: String, name: String) {
+    pub async fn nospawn_a(server: String, name: String) -> u8 {
         if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
             client.run().await;
         }
+
+        42 // the meaning of life
     }
 
     pub fn spawn_a(server: String, name: String) {
