@@ -6,7 +6,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::server_types::{Registry, MsgType};
 use crate::names::NamesShared;
-use crate::client_handler::ClientHandler;
+use crate::request_handler::RequestHandler;
 
 use tracing::info;
 
@@ -31,10 +31,10 @@ impl ServerListener {
 
                     info!("Server received new client connection {:?}", &addr);
 
-                    let reader = ClientHandler::new(tcp_read, local_tx.clone(),
+                    let reader = RequestHandler::new(tcp_read, local_tx.clone(),
                                                     clients.clone(), names.clone());
 
-                    ClientHandler::spawn(reader, addr, tcp_write, counter.clone());
+                    RequestHandler::spawn(reader, addr, tcp_write, counter.clone());
                 } else {
                     info!("Server abnormally exiting .. ");
                     break;
