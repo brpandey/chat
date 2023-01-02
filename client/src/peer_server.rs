@@ -16,6 +16,8 @@ impl PeerServerListener {
     pub fn spawn_accept(addr: String, name: String) {
         let _h = tokio::spawn(async move {
 
+            info!("Client peer server starting {:?}", &addr);
+            
             let result = TcpListener::bind(addr).await;
 
             if result.is_err() && result.as_ref().unwrap_err().kind() == ErrorKind::AddrInUse {

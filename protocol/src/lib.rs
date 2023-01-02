@@ -62,7 +62,10 @@ pub enum Response { // b'-'
         id: u16,
         msg: Vec<u8>, // support a single line for now -- not multi-line
     },
-    JoinNameAck(Vec<u8>), // b'|'
+    JoinNameAck{
+        id: u16,
+        name: Vec<u8>,
+    }, // b'|'
     Notification( // b'@', use for leave events, user lists etc..
         Vec<u8>
     ),
@@ -135,8 +138,9 @@ impl Decoder for ChatCodec {
                 src.advance(1);
                 match src.get_u8() {
                     RESP_NAMEACK => {
-                        msg = decode_vec(src)?;
-                        return Ok(Some(ChatMsg::Server(Response::JoinNameAck(msg))))
+                        id = src.get_u16();
+                        let name = decode_vec(src)?;
+                        return Ok(Some(ChatMsg::Server(Response::JoinNameAck{id, name})))
                     },
                     RESP_USERMSG => { // todo need to handle case where we don't have enough bytes read..
                         id = src.get_u16(); // id field
@@ -248,10 +252,11 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u16(id);
                 encode_vec(msg, dst);
             },
-            Response::JoinNameAck(msg) => {
+            Response::JoinNameAck{id, name} => {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_NAMEACK);
-                encode_vec(msg, dst);
+                dst.put_u16(id);
+                encode_vec(name, dst);
             },
             Response::Notification(msg) => {
                 dst.put_u8(RESP);

@@ -29,9 +29,9 @@ impl ChannelReceiver {
                             outgoing.broadcast_except(cid, response).await;
                             local_tx.send(MsgType::Users(cid)).await.expect("Unable to tx");
                         },
-                        MsgType::JoinedAck(cid, name) => {
-                            response = Response::JoinNameAck(name);
-                            outgoing.send(cid, response).await;
+                        MsgType::JoinedAck(id, name) => {
+                            response = Response::JoinNameAck{id, name};
+                            outgoing.send(id, response).await;
                         },
                         MsgType::JoinedAckUpdated(cid, msg) => {
                             response = Response::Notification(msg);

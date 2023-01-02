@@ -24,13 +24,17 @@ use crate::peer_server::PeerServerListener;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname\n$ Please input chat name: ";
 const SERVER: &str = "127.0.0.1:43210";
-const PEER_SERVER: &str = "127.0.0.1:43310";
-const PEER_SERVER_PORT: u16 = 43310;
+const PEER_SERVER: &str = "127.0.0.1";
+const PEER_SERVER_PORT0: u16 = 43310;
+const PEER_SERVER_PORT1: u16 = 43311;
+const PEER_SERVER_PORT2: u16 = 43312;
+const PEER_SERVER_PORT3: u16 = 43313;
 const SHUTDOWN: u8 = 1;
 const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
 pub struct Client {
+    id: u16,
     name: String,
     peer_clients: Option<Arc<Mutex<JoinSet<u8>>>>,
     shutdown_tx: BSender<u8>,
@@ -49,6 +53,7 @@ impl Client {
         let (local_tx, local_rx) = mpsc::channel::<Request>(64);
 
         Client {
+            id: 0,
             name: String::new(),
             peer_clients: Some(Arc::new(Mutex::new(JoinSet::new()))),
             shutdown_tx,
@@ -66,7 +71,6 @@ impl Client {
         let client = TcpStream::connect(SERVER).await
             .map_err(|e| { error!("Unable to connect to server"); e })?;
 
-        info!("Client peer server starting {:?}", &PEER_SERVER);
 
         //    let server_alive = Arc::new(AtomicBool::new(true));
         //    let server_alive_ref1 = Arc::clone(&server_alive);
@@ -89,9 +93,10 @@ impl Client {
             return Err(Error::new(ErrorKind::Other, "Unable to retrieve user chat name"));
         }
 
-        if let Some(Ok(ChatMsg::Server(Response::JoinNameAck(name_bytes)))) = self.fr.as_mut().unwrap().next().await {
-            println!(">>> Registered as name: {}", std::str::from_utf8(&name_bytes).unwrap());
-            self.name = String::from_utf8(name_bytes).unwrap_or_default();
+        if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.fr.as_mut().unwrap().next().await {
+            println!(">>> Registered as name: {}", std::str::from_utf8(&name).unwrap());
+            self.name = String::from_utf8(name).unwrap_or_default();
+            self.id = id;
         } else {
             return Err(Error::new(ErrorKind::Other, "Didn't receive JoinNameAck"));
         }
@@ -103,19 +108,23 @@ impl Client {
         tokio::spawn(async move {
             if let Ok(mut c) = Client::setup().await {
                 if c.register().await.is_ok() {
-                    c.run().await;
+                    c.run().await.expect("client terminated with an error");
                 }
             }
         })
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> io::Result<()>{
         self.spawn_read();
         self.spawn_cmd_line_read();
         self.spawn_write();
 
+        // stagger the local peer server port value
+        let port = peer_port(self.id);
+        let addr = format!("{}:{}", PEER_SERVER, port);
+
         // start up peer server for clients that connect to this node for peer to peer chat.
-        PeerServerListener::spawn_accept(PEER_SERVER.to_owned(), self.name.clone());
+        PeerServerListener::spawn_accept(addr, self.name.clone());
 
         loop {
             select! {
@@ -150,6 +159,8 @@ impl Client {
         }
 
         info!("waka waka!");
+
+        Ok(())
     }
 
 
@@ -185,8 +196,10 @@ impl Client {
                                 // unless the user explicitly switches over to communicating with the server from
                                 // peer to peer mode
 
-                                // drop current port of addr and add PEER_SERVER_PORT to addr
-                                addr.set_port(PEER_SERVER_PORT);
+                                // drop current port of addr
+                                // (since this is used already)
+                                // add a staggered port to addr
+                                addr.set_port(peer_port(id));
                                 let addr_string = format!("{}", &addr);
                                 peer_set.lock().await.spawn(PeerClient::nospawn_a(addr_string, client_name.clone()));
 
@@ -343,4 +356,15 @@ async fn read_async_user_input() -> io::Result<Option<Request>> {
     }
 
     Ok(None)
+}
+
+// given num spread the port to use amongst n values, where n is 4
+pub fn peer_port(num: u16) -> u16 {
+    match num % 4 {
+        0 => PEER_SERVER_PORT0,
+        1 => PEER_SERVER_PORT1,
+        2 => PEER_SERVER_PORT2,
+        3 => PEER_SERVER_PORT3,
+        _ => PEER_SERVER_PORT0,
+    }
 }
