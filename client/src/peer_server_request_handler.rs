@@ -13,7 +13,7 @@ use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 const PEER_LEFT: &str = "Peer {} has left";
 const PEER_HELLO: &str = "Peer {} is ready to chat";
 
-pub struct PeerServerHandler {
+pub struct PeerServerRequestHandler {
     reader: Option<PeerServerReader>,
     writer: Option<PeerServerWriter>,
 }
@@ -33,7 +33,7 @@ struct PeerServerWriter {
 
 const BOUNDED_CHANNEL_SIZE: usize = 64;
 
-impl PeerServerHandler {
+impl PeerServerRequestHandler {
     pub fn new(tcp_read: tcp::OwnedReadHalf, tcp_write: tcp::OwnedWriteHalf,
                peer_b_client_tx: Sender<PeerMsgType>,
                peer_b_server_rx: Receiver<PeerMsgType>,
@@ -196,16 +196,11 @@ impl PeerServerWriter {
 }
 
 pub fn split_msg(msg: Vec<u8>) -> Vec<u8> {
-//    let msg_prefix = "Peer B says:".as_bytes().to_vec();
-    let msg_prefix = vec![];
-
+    let mut output: Vec<u8> = vec![];
     for mut line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
         if line.is_empty() { continue }
-        let mut msg: Vec<u8> = Vec::with_capacity(msg_prefix.len() + line.len() + 1);
-        let mut p = msg_prefix.clone();
-        msg.append(&mut p);
-        msg.append(&mut line);
+        output.append(&mut line);
     }
 
-    msg
+    output
 }
