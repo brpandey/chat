@@ -43,7 +43,7 @@ pub enum ChatMsg {
     PeerB(Reply), // to
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Request { // b'+'
     Users, // b':'
     Quit, //  b'$'
@@ -54,6 +54,7 @@ pub enum Request { // b'+'
         name: Vec<u8>,
     },
     Heartbeat, // b'!'
+    Noop, 
 }
 
 #[derive(Debug, Clone)]
@@ -83,11 +84,12 @@ pub enum Response { // b'-'
     Heartbeat, // b'!'
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Ask { // b'{'
     Hello(Vec<u8>), // b'|'           // peer a hello request
     Leave(Vec<u8>), // b'?'
     Note(Vec<u8>), // b'>'
+    Noop,
 }
 
 #[derive(Debug, Clone)]
@@ -302,7 +304,8 @@ impl Encoder<Ask> for ChatCodec {
                 dst.put_u8(ASK);
                 dst.put_u8(ASK_NOTE);
                 encode_vec(msg, dst);
-            }
+            },
+            _ => unimplemented!()
         }
 
         Ok(())
