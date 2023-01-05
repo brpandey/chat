@@ -20,7 +20,7 @@ const BOUNDED_CHANNEL_SIZE: usize = 64;
 async fn main() -> io::Result<()> {
     fmt()
         .compact()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .init();
 
     // Setup unique registry map and chat names,

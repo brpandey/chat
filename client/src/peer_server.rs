@@ -4,20 +4,20 @@ use tokio::sync::mpsc;
 use std::io::ErrorKind;
 
 use crate::peer_client::PeerClient;
-use crate::peer_server_handler::PeerServerHandler;
-
+use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::peer_types::PeerMsgType;
+use crate::input_handler::InputShared;
 
 use tracing::info;
 
 pub struct PeerServerListener;
 
 impl PeerServerListener {
-    pub fn spawn_accept(addr: String, name: String) {
+    pub fn spawn_accept(addr: String, name: String, io_shared: InputShared) {
         let _h = tokio::spawn(async move {
 
             info!("Client peer server starting {:?}", &addr);
-            
+
             let result = TcpListener::bind(addr).await;
 
             if result.is_err() && result.as_ref().unwrap_err().kind() == ErrorKind::AddrInUse {
@@ -41,9 +41,9 @@ impl PeerServerListener {
                     // For each new peer that wants to connect with this node e.g. N1
                     // spawn a separate peer client of type B that locally communicates with peer server
                     // of type B
-                    PeerClient::spawn_b(client_rx, server_tx, name.clone());
+                    PeerClient::spawn_b(client_rx, server_tx, name.clone(), io_shared.clone());
 
-                    let mut handler = PeerServerHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
+                    let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
                     handler.spawn().await;
                 } else {
                     break;

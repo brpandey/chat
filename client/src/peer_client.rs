@@ -1,10 +1,10 @@
 use tokio::select;
 use tokio::net::tcp;
+use tokio::sync::{broadcast};
 use tokio::sync::mpsc::{self, Sender, Receiver};
-use tokio::sync::broadcast::{self};
 use tokio::sync::broadcast::Sender as BSender;
 use tokio::sync::broadcast::Receiver as BReceiver;
-use tokio_util::codec::{LinesCodec, FramedRead, FramedWrite};
+use tokio_util::codec::{/*LinesCodec,*/ FramedRead, FramedWrite};
 use tokio::net::TcpStream;
 use tokio::io::{self}; //, empty, sink}; 
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
@@ -13,13 +13,10 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tracing::{info, debug, error};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
-
 use crate::peer_types::PeerMsgType;
+use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
 
 const SHUTDOWN: u8 = 1;
-const LINES_MAX_LEN: usize = 256;
-const USER_LINES: usize = 64;
-
 const PEER_HELLO: &str = "Peer {} is ready to chat";
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -49,7 +46,7 @@ impl PeerRead {
     }
 
     // Loop to handle ongoing client msgs to server
-    async fn handle_peer_read(&mut self) {
+    async fn handle_peer_read(&mut self, io_id: u16) {
         loop {
             debug!("task A: listening to peer server replies...");
 
@@ -82,7 +79,7 @@ impl PeerRead {
 
             // select! read from server or if we are server (peer B), read from client_rx (peer A)
 
-            //  peer A (client only) --------------->   peer B (client and server) <---------- peer C (client only)
+            // peer A (client only) --------------->   peer B (client and server) <---------- peer C (client only)
             select! {
                 // Type B code
                 // Display server received message and as peer B respond as fit
@@ -100,6 +97,7 @@ impl PeerRead {
                         },
                         Some(PeerMsgType::Hello(msg)) => {
                             println!("< {} >", std::str::from_utf8(&msg).unwrap_or_default());
+                            println!("< To chat with peer, type: switch {} (peer type B)>", io_id - IO_ID_OFFSET);
                         },
                         Some(PeerMsgType::Note(msg)) => {
                             println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
@@ -122,6 +120,7 @@ impl PeerRead {
                             let name_str = std::str::from_utf8(&name).unwrap_or_default();
                             let hello_msg = PEER_HELLO.replace("{}", name_str).into_bytes();
                             println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
+                            println!("< To chat with peer, type: switch {} (peer type A)>", io_id - IO_ID_OFFSET);
                         },
                         Some(Ok(ChatMsg::PeerB(Reply::Note(msg)))) => {
                             println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
@@ -206,35 +205,37 @@ pub struct PeerClient {
     local_tx: Option<Sender<Ask>>,
     shutdown_rx: Option<BReceiver<u8>>,
     name: String,
+    io_id: u16,
 }
 
 impl PeerClient {
-
-    pub async fn nospawn_a(server: String, name: String) -> u8 {
-        if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
+    pub async fn nospawn_a(server: String, name: String, io_shared: InputShared) -> u8 {
+        if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, &io_shared, PeerType::A).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
-            client.run().await;
+            client.run(io_shared).await;
         }
 
         42 // the meaning of life
     }
 
-    pub fn spawn_a(server: String, name: String) {
+    /*
+    pub fn spawn_a(server: String, name: String, io_shared: InputShared) {
         let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, PeerType::A).await {
+            if let Ok(mut client) = PeerClient::setup(Some(server), None, None, name, &io_shared, PeerType::A).await {
                 // peer A initiates hello since it initiated the session!
                 client.send_hello().await;
-                client.run().await;
+                client.run(io_shared).await;
             }
         });
     }
+    */
 
-
-    pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>, name: String) {
+    pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
+                   name: String, io_shared: InputShared) {
         let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::setup(None, Some(client_rx), Some(server_tx), name, PeerType::B).await {
-                client.run().await;
+            if let Ok(mut client) = PeerClient::setup(None, Some(client_rx), Some(server_tx), name, &io_shared, PeerType::B).await {
+                client.run(io_shared).await;
             }
         });
     }
@@ -242,17 +243,19 @@ impl PeerClient {
     pub async fn setup(server: Option<String>,
                        client_rx: Option<Receiver<PeerMsgType>>, server_tx: Option<Sender<PeerMsgType>>,
                        name: String,
-                       client_type: PeerType) -> io::Result<PeerClient> {
+                       io_shared: &InputShared,
+                       client_type: PeerType)
+                       -> io::Result<PeerClient> {
 
         // for communication between cmd line read and peer write
         let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
 
         // for all peer client tasks shutdown (e.g. user has disconnected or peer user has disconnected)
         let (sd_tx, sd_rx1) = broadcast::channel(16);
-        let sd_rx2 = sd_tx.subscribe();
 
         match client_type {
             // client is peer type A which initiates a reaquest to an already running peer B
+            // client type A is not connected to the peer B server other than through tcp
             PeerType::A => {
                 let client = TcpStream::connect(server.unwrap()).await
                     .map_err(|e| { error!("Unable to connect to server"); e })?;
@@ -260,18 +263,24 @@ impl PeerClient {
                 // split tcpstream so we can hand off to r & w tasks
                 let (client_read, client_write) = client.into_split();
 
+                let sd_rx2 = sd_tx.subscribe();
+
                 let read = Some(PeerRead::new(Some(client_read), None, sd_tx));
                 let write = Some(PeerWrite::new(Some(client_write), local_rx, None, sd_rx1, client_type));
+                let io_id: u16 = io_shared.get_next_id().await;
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name}) //, client_type})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
             },
-
-            // client is peer type B coupled with running peer type B server on the same node
+            // client type B is the interative part of the peer type B server on the same node
+            // client type B is connected to the peer type B through channels
             PeerType::B => {
+                let sd_rx2 = sd_tx.subscribe();
+
                 let read = Some(PeerRead::new(None, client_rx, sd_tx));
                 let write = Some(PeerWrite::new(None, local_rx, server_tx, sd_rx1, client_type));
+                let io_id: u16 = io_shared.get_next_id().await;
 
-                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name})
+                Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
             }
         }
     }
@@ -281,14 +290,16 @@ impl PeerClient {
         self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
     }
 
-    async fn run(&mut self) {
+    async fn run(&mut self, io_shared: InputShared) {
         let mut read = self.read.take().unwrap();
         let mut write = self.write.take().unwrap();
         let local_tx = self.local_tx.clone().unwrap();
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
+        let io_id = self.io_id;
+        let mut input_rx = io_shared.get_receiver();
 
         let peer_server_read_handle = tokio::spawn(async move {
-            read.handle_peer_read().await;
+            read.handle_peer_read(io_id).await;
         });
 
         let _peer_write_handle = tokio::spawn(async move {
@@ -302,8 +313,11 @@ impl PeerClient {
                 debug!("task peer cmd line read: input looping");
 
                 select! {
-                    Some(msg) = read_async_user_input(&name) => {
-                        local_tx.send(msg).await.expect("xxx Unable to tx");
+                    Ok(msg) = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared) => {
+                        let req = PeerClient::parse_input(&name, msg);
+                        if req != Ask::Noop {
+                            local_tx.send(req).await.expect("xxx Unable to tx");
+                        }
                     }
                     _ = shutdown_rx.recv() => { // exit task if shutdown received
                         return
@@ -321,41 +335,22 @@ impl PeerClient {
 
         info!("gonzo C");
     }
-}
 
-async fn read_async_user_input(name: &str) -> Option<Ask> {
-    let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
-
-    // need to implement some sort of lock on stdin
-    // to coordinate between data intended for rendezvous server or
-    // even input destined for another peer
-
-    if let Some(Ok(line)) = fr.next().await {
-        // handle user input-ed commands
-        match line.as_str() {
+    pub fn parse_input(name: &str, line: Option<String>) -> Ask {
+        if line.is_none() { return Ask::Noop }
+        match line.unwrap().as_str() {
             "\\leave" => {
                 info!("Private session ended by user {}", name);
-                return Some(Ask::Leave(name.as_bytes().to_vec()));
+                return Ask::Leave(name.as_bytes().to_vec());
             },
-            _ => (),
+            l => {
+                info!("not a peerclient command message");
+                // if no commands, split up user input
+                let mut out = vec![];
+                out.push(format!("<{}> ", name).into_bytes());
+                let msg = InputHandler::interleave_newlines(l, out);
+                return Ask::Note(msg)
+            },
         }
-
-        // if no commands, split up user input
-        let mut total = vec![];
-
-        let msg_prefix = format!("<{}> ", name);
-        total.push(msg_prefix.into_bytes());
-        let mut citer = line.as_bytes().chunks(USER_LINES);
-
-        while let Some(c) = citer.next() {
-            let mut line = c.to_vec();
-            line.push(b'\n');
-            total.push(line);
-        }
-
-        let msg: Vec<u8> = total.into_iter().flatten().collect();
-        return Some(Ask::Note(msg))
     }
-
-    None
 }
