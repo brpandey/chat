@@ -6,7 +6,11 @@ use std::sync::{Arc, /*Mutex, RwLock */};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashSet;
 
+use tokio::select;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender as MSender;
+use tokio::sync::mpsc::Receiver as MReceiver;
 use tokio::sync::watch::{self, Sender, Receiver};
 use tokio::io;
 use tokio_util::codec::{FramedRead, LinesCodec};
@@ -14,6 +18,7 @@ use tokio_stream::StreamExt; // provides combinator methods like next on to of F
 
 use tracing::info;
 
+pub type InputNotifier = MSender<InputMsg>;
 pub type InputReceiver = Receiver<(u16, u16)>;
 type InputSender = Sender<(u16, u16)>;
 
@@ -25,19 +30,28 @@ const USER_LINES: usize = 64;
 pub type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
 pub type IoIds = RwLock<HashSet<u16>>;
 
+#[derive(Debug)]
+pub enum InputMsg {
+    NewSession(u16),
+    CloseSession(u16),
+}
+
 pub struct InputHandler {
     shared: InputShared,
     tx: Option<InputSender>,
+    rx: Option<MReceiver<InputMsg>>,
 }
 
 impl InputHandler {
     pub fn new() -> Self {
-        let (tx, rx) = watch::channel((0, 0)); // Watch channel has 1 tx and potentially multiple receivers
-        let shared = InputShared::new(IO_ID_START, rx);
+        let (msg_tx, msg_rx) = mpsc::channel::<InputMsg>(32);
+        let (watch_tx, watch_rx) = watch::channel((0, 0)); // Watch channel has 1 tx and potentially multiple receivers
+        let shared = InputShared::new(IO_ID_START, watch_rx, msg_tx);
 
         Self {
             shared,
-            tx: Some(tx),
+            tx: Some(watch_tx),
+            rx: Some(msg_rx),
         }
     }
 
@@ -61,7 +75,8 @@ impl InputHandler {
 
     pub fn spawn(mut input: InputHandler) -> tokio::task::JoinHandle<()> {
         let shared = input.shared.clone();
-        let tx = input.tx.take().unwrap();
+        let watch_tx = input.tx.take().unwrap();
+        let mut msg_rx = input.rx.take().unwrap();
         let mut current_id = IO_ID_START;
         let mut seq_no = 0;
 
@@ -71,44 +86,59 @@ impl InputHandler {
                 let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
                 //            let stdin = io::stdin();
 
-                if let Some(Ok(line)) = fr.next().await {
+                select!(
+                    Some(Ok(line)) = fr.next() => {
 
-                    // grab the stdin lines at the exclusive behest of anyone else
-                    //            for line in stdin.lock().lines().map(|l| l.unwrap()) {
+                        // grab the stdin lines at the exclusive behest of anyone else
+                        //            for line in stdin.lock().lines().map(|l| l.unwrap()) {
 
-                    // handles terminal input switching
-                    if line.starts_with("\\switch") {
-                        if let Some(id_str) = line.splitn(3, ' ').skip(1).take(1).next() {
-                            let switch_id_str = id_str.to_owned(); // &str to String
-                            let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
-                            info!("Attempting to switch input to {}", &switch_id);
+                        // handles terminal input switching
+                        if line.starts_with("\\switch") || line.starts_with("\\s") {
+                            if let Some(id_str) = line.splitn(3, ' ').skip(1).take(1).next() {
+                                let switch_id_str = id_str.to_owned(); // &str to String
+                                let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
+                                info!("Attempting to switch input to {}", &switch_id);
 
-                            // Local validation for valid id
-                            if shared.contains_id(&switch_id).await {
-                                info!("Successful id and line switch, old id {} new id {}", current_id, switch_id);
-                                // swap out old current id and line and replace with new
-                                current_id = switch_id;
-                                shared.switch_id_and_line(switch_id, &line).await;
-                            } else { // if switch_id not valid ignore and continue
-                                info!("not a valid switch id");
-                                continue;
+                                // Local validation for valid id
+                                if shared.contains_id(&switch_id).await {
+                                    info!("Successful id and line switch, old id {} new id {}", current_id, switch_id);
+                                    // swap out old current id and line and replace with new
+                                    current_id = switch_id;
+                                    shared.switch_id_and_line(switch_id, &line).await;
+                                } else { // if switch_id not valid ignore and continue
+                                    info!("not a valid switch id");
+                                }
+                            }
+                            continue; // don't forward the switch msg on if it was successful
+                        } else {
+                            shared.switch_line(&line).await; // replace old line with new line
+                        }
+
+                        seq_no += 1;
+
+                        info!("Sending new change seq_no {}, current_id {} corresponding to line {}", seq_no, current_id, &line);
+
+                        // notify that a new line has been received (changing seq no) along with the current id
+                        watch_tx.send((seq_no, current_id)).expect("Unable to send value on watch channel");
+                    }
+                    Some(msg) = msg_rx.recv() => {
+                        match msg {
+                            InputMsg::NewSession(id) => {
+                                if shared.new_session(id).await {
+                                    current_id = id;
+                                }
+                            },
+                            InputMsg::CloseSession(id) => {
+                                if shared.close_session(id).await {
+                                    current_id = IO_ID_START;
+                                }
                             }
                         }
-                    } else {
-                        shared.switch_line(&line).await; // replace old line with new line
                     }
-
-                    seq_no += 1;
-
-                    info!("Sending new change seq_no {}, current_id {} corresponding to line {}", seq_no, current_id, &line);
-
-                    // notify that a new line has been received (changing seq no) along with the current id
-                    tx.send((seq_no, current_id)).expect("Unable to send value on watch channel");
-                }
+                )
             }
         })
     }
-
 
     // blocking function to gather user input from std::io::stdin
     // should be called first for name registration
@@ -122,7 +152,6 @@ impl InputHandler {
 
         Ok(Some(name))
     }
-
 
     pub async fn read_async_user_input(current_id: u16,
                                        input_rx: &mut InputReceiver,
@@ -138,9 +167,9 @@ impl InputHandler {
             new_line = input_rx.changed().await.is_ok();
             seq_id = input_rx.borrow().0.clone();
             watch_id = input_rx.borrow().1.clone();
-
-            info!("read_async await ok status: new_line {} seq_id {} watch_id {}", new_line, seq_id, watch_id);
         }
+
+        info!("read_async await ok status: new_line {} seq_id {} watch_id {}", new_line, seq_id, watch_id);
 
         if new_line {
             if current_id == watch_id {
@@ -151,7 +180,7 @@ impl InputHandler {
                     info!("checkpoint A.2 current id didn't match arc current rwlock hence no line to provide");
                 }
             } else {
-                info!("current_id doesn't match watch_id from watch channel");
+                info!("current_id {} doesn't match watch_id {} from watch channel", current_id, watch_id);
             }
         }
         else {
@@ -166,6 +195,7 @@ pub struct InputBase {
     current: IdLinePair,
     ids: IoIds,
     rx: InputReceiver,
+    tx: InputNotifier,
     counter: AtomicU16,
 }
 
@@ -174,7 +204,7 @@ pub struct InputShared {
 }
 
 impl InputShared {
-    pub fn new(seed_id: u16, rx: InputReceiver) -> Self {
+    pub fn new(seed_id: u16, rx: InputReceiver, tx: InputNotifier) -> Self {
         let current = RwLock::new((seed_id, String::from("empty")));
         let ids = RwLock::new(HashSet::from([seed_id]));
         let counter = AtomicU16::new(seed_id);
@@ -185,40 +215,72 @@ impl InputShared {
                     current,
                     ids,
                     rx,
+                    tx,
                     counter
                 }
             )
         }
     }
 
-    pub fn get_receiver(&self) -> InputReceiver {
+    pub(crate) fn get_receiver(&self) -> InputReceiver {
         self.shared.rx.clone()
     }
 
+    pub(crate) fn get_notifier(&self) -> InputNotifier {
+        self.shared.tx.clone()
+    }
+
     /* Id methods */
-    pub async fn get_next_id(&self) -> u16 {
+    pub(crate) async fn get_next_id(&self) -> u16 {
         let new_id = self.shared.counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
         self.shared.ids.write().await.insert(new_id);     // add to RwLock
         new_id
     }
 
+    async fn new_session(&self, io_id: u16) -> bool {
+        self.force_switch_id(io_id).await
+    }
+
+    async fn close_session(&self, io_id: u16) -> bool {
+        let f1: bool = self.force_switch_id(IO_ID_START).await;
+        let f2: bool = self.remove_id(io_id).await; // remove peer client's io id
+        f1 && f2
+    }
+
     // remove from RwLock
-    pub async fn remove_id(&self, id: u16) {
-        self.shared.ids.write().await.remove(&id);
+    async fn remove_id(&self, id: u16) -> bool {
+        self.shared.ids.write().await.remove(&id)
     }
 
     async fn contains_id(&self, id: &u16) -> bool {
         self.shared.ids.read().await.contains(id)
     }
 
-
     /* Current id and line methods */
-/*    pub async fn switch_line(&self, line: &str) {
-        // set lock inner value to new line
-        let mut inner  = self.shared.current.write().await;
-        *inner = (inner.0, line.to_owned());
+    async fn force_switch_id(&self, switch_id: u16) -> bool {
+        let mut switched: bool = false;
+
+        if self.contains_id(&switch_id).await {
+            // set lock inner value to id
+            let mut inner  = self.shared.current.write().await;
+            inner.0 = switch_id;
+            switched = true;
+        }
+
+        {
+            let inner = self.shared.current.read().await;
+            println!("sanity check did we update shared current id? {} {}", inner.0, switch_id);
+        }
+        if switched {
+            if switch_id == IO_ID_START {
+                println!(">>> Auto switched back to main lobby {}", switch_id - IO_ID_OFFSET);
+            } else {
+                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\s 0", switch_id - IO_ID_OFFSET);
+            }
+        }
+
+        switched
     }
-*/
 
     /* Current id and line methods */
     async fn switch_line(&self, line: &str) {

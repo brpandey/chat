@@ -13,6 +13,7 @@ use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 const PEER_LEFT: &str = "Peer {} has left";
 const PEER_HELLO: &str = "Peer {} is ready to chat";
 
+// Just a reader and writer (no need to handle cmd line as peer client b does this)
 pub struct PeerServerRequestHandler {
     reader: Option<PeerServerReader>,
     writer: Option<PeerServerWriter>,
@@ -84,11 +85,9 @@ impl PeerServerReader {
         let input = self.tcp_read.take().unwrap();
         let mut fr = FramedRead::new(input, ChatCodec);
 
-        info!("this is the peer server handle_read spawned task");
-
         loop {
             if let Some(value) = fr.next().await {
-                info!("peer server received: {:?}", value);
+                info!("Peer server received from tcp_read: {:?}", value);
 
                 match value {
                     Ok(ChatMsg::PeerA(Ask::Hello(name))) => {
@@ -150,14 +149,11 @@ impl PeerServerWriter {
         let mut fw = FramedWrite::new(input, ChatCodec);
         let mut reply;
 
-        info!("this is the peer server handle_write spawned task");
-
-        //
         loop {
             select! {
             // Read from local read channel, data received from tcp client peer a
                 Some(msg_a) = self.local_rx.recv() => {
-                    info!("peer server -- type a - received in its server msg queue: {:?}", &msg_a);
+                    info!("Peer server A - received in its local msg queue: {:?}", &msg_a);
 
                     match msg_a {
                         PeerMsgType::Hello(m) => {
@@ -169,7 +165,7 @@ impl PeerServerWriter {
                     }
                 }
                 Some(msg_b) = self.peer_b_server_rx.recv() => {
-                    info!("peer server -- type b - received in its server msg queue: {:?}", &msg_b);
+                    info!("Peer server B - received in its local client-server msg queue: {:?}", &msg_b);
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
                         PeerMsgType::Leave(m) => { // case where peer b (as opposed to peer a) wants to leave

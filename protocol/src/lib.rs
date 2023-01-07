@@ -71,12 +71,12 @@ pub enum Response { // b'-'
         Vec<u8>
     ),
     ForkPeerAckA { // b'^'   same type this used for decode
-        id: u16,
+        pid: u16, // peer id
         name: Vec<u8>,
         addr: SocketAddr,
     },
     ForkPeerAckB { // b'^'   same type this used for encode
-        id: u16,
+        pid: u16, // peer id
         name: Vec<u8>,
         addr: Vec<u8>,
     },
@@ -107,7 +107,7 @@ impl Decoder for ChatCodec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let id: u16;
+        let (id, pid) : (u16, u16);
         let msg: Vec<u8>;
 
         if src.is_empty() || src.len() < 2 {
@@ -154,10 +154,10 @@ impl Decoder for ChatCodec {
                         return Ok(Some(ChatMsg::Server(Response::Notification(msg))))
                     },
                     RESP_FORKACK => {
-                        id = src.get_u16();
+                        pid = src.get_u16();
                         let name = decode_vec(src)?;
                         let addr = decode_addr(src)?;
-                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{id, name, addr})))
+                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{pid, name, addr})))
                     },
                     RESP_PEERUNAV => {
                         let name = decode_vec(src)?;
@@ -265,10 +265,10 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u8(RESP_NOTIF);
                 encode_vec(msg, dst);
             },
-            Response::ForkPeerAckB{id, name, addr} => {
+            Response::ForkPeerAckB{pid, name, addr} => {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_FORKACK);
-                dst.put_u16(id);
+                dst.put_u16(pid);
                 encode_vec(name, dst);
                 encode_vec(addr, dst); // upon encode socket addr is Vec<u8
 //                encode_addr(addr, dst);

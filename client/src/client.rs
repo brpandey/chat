@@ -172,7 +172,7 @@ impl Client {
         let shutdown_tx = self.shutdown_tx.clone();
 //        let shutdown_rx = self.shutdown_tx.subscribe();
         let mut fr = self.fr.take().unwrap();
-        let client_id = self.id;
+//        let client_id = self.id;
 
         let _server_read_handle = tokio::spawn(async move {
             loop {
@@ -190,9 +190,11 @@ impl Client {
                             Ok(ChatMsg::Server(Response::Notification(line))) => {
                                 println!(">>> {}", std::str::from_utf8(&line).unwrap_or_default());
                             },
-                            Ok(ChatMsg::Server(Response::ForkPeerAckA{id, name, mut addr})) => {
-                                println!(">>> About to fork private session with {} {}",
-                                         id, std::str::from_utf8(&name).unwrap_or_default());
+                            Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, name, mut addr})) => {
+                                println!(">>> Forked private session with {} {}",
+                                         pid, std::str::from_utf8(&name).unwrap_or_default());
+
+                                println!(">>> To switch back to main lobby, type: \\s 0");
 
                                 // spawn tokio task to send client requests to peer server address
                                 // responding to server requests will take a lower priority
@@ -202,7 +204,7 @@ impl Client {
                                 // drop current port of addr
                                 // (since this is used already)
                                 // add a staggered port to addr
-                                addr.set_port(peer_port(client_id));
+                                addr.set_port(peer_port(pid));
                                 let addr_string = format!("{}", &addr);
 
                                 peer_set

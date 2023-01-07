@@ -14,7 +14,7 @@ use tracing::{info, debug, error};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 use crate::peer_types::PeerMsgType;
-use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
+use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler, InputShared};
 
 const SHUTDOWN: u8 = 1;
 const PEER_HELLO: &str = "Peer {} is ready to chat";
@@ -81,34 +81,10 @@ impl PeerRead {
 
             // peer A (client only) --------------->   peer B (client and server) <---------- peer C (client only)
             select! {
-                // Type B code
-                // Display server received message and as peer B respond as fit
-                // via command line
-                  Some(msg_b) = read_b => {
-                      //  Some(msg_b) = self.client_rx.as_mut().unwrap().recv(), if self.client_rx.is_some() => {
-                    debug!("received X local channel peer server value is {:?}", msg_b);
-
-                    match msg_b {
-                        // if peer A wants to leave then terminate this peer 
-                        Some(PeerMsgType::Leave(name)) => {
-                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap_or_default());
-                            self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
-                            return
-                        },
-                        Some(PeerMsgType::Hello(msg)) => {
-                            println!("< {} >", std::str::from_utf8(&msg).unwrap_or_default());
-                            println!("< To chat with peer, type: switch {} (peer type B)>", io_id - IO_ID_OFFSET);
-                        },
-                        Some(PeerMsgType::Note(msg)) => {
-                            println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
-                        },
-                        _ => unimplemented!(),
-                    }
-                }
                 // Type A code
                 // Read lines from server via tcp if we are peer A in the above scenario
                 Some(msg_a) = read_a => {
-                    debug!("received Y tcp peer server value is {:?}", msg_a);
+                    info!("received Y tcp peer server value is {:?}", msg_a);
 
                     match msg_a {
                         Some(Ok(ChatMsg::PeerB(Reply::Leave(msg)))) => { // peer B has left, terminate this peer
@@ -118,9 +94,10 @@ impl PeerRead {
                         },
                         Some(Ok(ChatMsg::PeerB(Reply::Hello(name)))) => { // peer B has responded with hello
                             let name_str = std::str::from_utf8(&name).unwrap_or_default();
-                            let hello_msg = PEER_HELLO.replace("{}", name_str).into_bytes();
+                            let hello_msg = PEER_HELLO.replace("{}", &name_str).into_bytes();
                             println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
-                            println!("< To chat with peer, type: switch {} (peer type A)>", io_id - IO_ID_OFFSET);
+                            println!("< To chat with {} peer, type: \\s {} (peer type A), to return to lobby type: \\s 0>",
+                                     &name_str, io_id - IO_ID_OFFSET);
                         },
                         Some(Ok(ChatMsg::PeerB(Reply::Note(msg)))) => {
                             println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
@@ -133,6 +110,30 @@ impl PeerRead {
                         None => break, //unimplemented!(),
                     }
                 }
+                // Type B code
+                // Display server received message and as peer B respond as fit
+                // via command line
+                  Some(msg_b) = read_b => {
+                      //  Some(msg_b) = self.client_rx.as_mut().unwrap().recv(), if self.client_rx.is_some() => {
+                    info!("received X local channel peer server value is {:?}", msg_b);
+
+                    match msg_b {
+                        // if peer A wants to leave then terminate this peer 
+                        Some(PeerMsgType::Leave(name)) => {
+                            println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap_or_default());
+                            self.shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            return
+                        },
+                        Some(PeerMsgType::Hello(msg)) => {
+                            println!("< {}, to chat, type: \\s {} (peer type B), to return to lobby, type: \\s 0 >", std::str::from_utf8(&msg).unwrap_or_default(), io_id - IO_ID_OFFSET);
+                        },
+                        Some(PeerMsgType::Note(msg)) => {
+                            println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
+                        },
+                        _ => unimplemented!(),
+                    }
+                }
+
                 else => {
                     info!("Peer Server Remote has closed");
                     break;
@@ -257,7 +258,7 @@ impl PeerClient {
             // client is peer type A which initiates a reaquest to an already running peer B
             // client type A is not connected to the peer B server other than through tcp
             PeerType::A => {
-                let client = TcpStream::connect(server.unwrap()).await
+                let client = TcpStream::connect(server.as_ref().unwrap()).await
                     .map_err(|e| { error!("Unable to connect to server"); e })?;
 
                 // split tcpstream so we can hand off to r & w tasks
@@ -267,7 +268,12 @@ impl PeerClient {
 
                 let read = Some(PeerRead::new(Some(client_read), None, sd_tx));
                 let write = Some(PeerWrite::new(Some(client_write), local_rx, None, sd_rx1, client_type));
+
                 let io_id: u16 = io_shared.get_next_id().await;
+                let io_notifier = io_shared.get_notifier();
+                io_notifier.send(InputMsg::NewSession(io_id)).await.expect("xxx Unable to io_notifier tx");
+
+                info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}", &name, io_id, &server);
 
                 Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
             },
@@ -279,6 +285,8 @@ impl PeerClient {
                 let read = Some(PeerRead::new(None, client_rx, sd_tx));
                 let write = Some(PeerWrite::new(None, local_rx, server_tx, sd_rx1, client_type));
                 let io_id: u16 = io_shared.get_next_id().await;
+
+                info!("New peer client B, name: {} io_id: {}, set up local channel to local peer server {:?}", &name, io_id, &server);
 
                 Ok(PeerClient {read, write, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
             }
@@ -297,6 +305,9 @@ impl PeerClient {
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
+        let io_notifier = io_shared.get_notifier();
+
+//        let io_shared2 = io_shared.clone();
 
         let peer_server_read_handle = tokio::spawn(async move {
             read.handle_peer_read(io_id).await;
@@ -310,16 +321,20 @@ impl PeerClient {
         // Use current thread to loop and grab data from command line
         let cmd_line_handle = tokio::spawn(async move {
             loop {
-                debug!("task peer cmd line read: input looping");
+                info!("task peer cmd line read: input looping");
 
                 select! {
                     Ok(msg) = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared) => {
                         let req = PeerClient::parse_input(&name, msg);
                         if req != Ask::Noop {
+                            info!("about to send peer client cmd line input request data on local_tx");
                             local_tx.send(req).await.expect("xxx Unable to tx");
+                        } else {
+                            info!("noop hence no local tx send");
                         }
                     }
                     _ = shutdown_rx.recv() => { // exit task if shutdown received
+                        info!("shutdown received!");
                         return
                     }
                 }
@@ -328,6 +343,9 @@ impl PeerClient {
 
         info!("gonzo A");
         peer_server_read_handle.await.unwrap();
+
+        // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
+        io_notifier.send(InputMsg::CloseSession(io_id)).await.expect("xxx Unable to io_notifier tx");
 
         info!("gonzo B");
 
