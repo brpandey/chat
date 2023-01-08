@@ -91,13 +91,14 @@ impl PeerServerReader {
 
                 match value {
                     Ok(ChatMsg::PeerA(Ask::Hello(name))) => {
-                        let name_str = std::str::from_utf8(&name).unwrap_or_default();
-                        let hello_msg = PEER_HELLO.replace("{}", name_str).into_bytes();
+                        let name_str = String::from_utf8(name).unwrap_or_default();
+                        let hello_msg = PEER_HELLO.replace("{}", &name_str).into_bytes();
                         // send msg to this local peer b node
-                        self.peer_b_client_tx.send(PeerMsgType::Hello(hello_msg)).await
+                        self.peer_b_client_tx.send(PeerMsgType::Hello(name_str, hello_msg)).await
                                             .expect("Unable to tx");
                         // send response msg back to peer a with peer b's name
-                        self.local_tx.send(PeerMsgType::Hello(self.name.clone().into_bytes())).await // send back peer b server's name
+                        self.local_tx.send(PeerMsgType::Hello(String::new(),
+                                                              self.name.clone().into_bytes())).await // send back peer b server's name
                             .expect("Unable to tx");
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {
@@ -156,7 +157,7 @@ impl PeerServerWriter {
                     info!("Peer server A - received in its local msg queue: {:?}", &msg_a);
 
                     match msg_a {
-                        PeerMsgType::Hello(m) => {
+                        PeerMsgType::Hello(_, m) => {
                             reply = Reply::Hello(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },

@@ -184,8 +184,8 @@ impl Client {
                                 println!(">>> {}", std::str::from_utf8(&line).unwrap_or_default());
                             },
                             Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, name, mut addr})) => {
-                                println!(">>> Forked private session with {} {}",
-                                         pid, std::str::from_utf8(&name).unwrap_or_default());
+                                let peer_name = String::from_utf8(name).unwrap_or_default();
+                                println!(">>> Forked private session with {} {}", pid, peer_name);
 
                                 println!(">>> To switch back to main lobby, type: \\s 0");
 
@@ -202,7 +202,7 @@ impl Client {
 
                                 peer_set
                                     .lock().await
-                                    .spawn(PeerClient::nospawn_a(addr_string, client_name.clone(), io_shared.clone()));
+                                    .spawn(PeerClient::nospawn_a(addr_string, client_name.clone(), peer_name, io_shared.clone()));
 
                                 // should probably set some cond var that blocks other threads from reading from stdin
                                 // until user explicitly switches to client -> server mode

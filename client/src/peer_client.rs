@@ -24,8 +24,8 @@ pub struct PeerClient {
 }
 
 impl PeerClient {
-    pub async fn nospawn_a(server: String, name: String, io_shared: InputShared) -> u8 {
-        if let Ok(mut client) = PeerClient::setup_a(server, name, &io_shared).await {
+    pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> u8 {
+        if let Ok(mut client) = PeerClient::setup_a(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
             client.run(io_shared).await;
@@ -43,13 +43,13 @@ impl PeerClient {
         });
     }
 
+    // client is peer type A which initiates a reaquest to an already running peer B
+    // client type A is not connected to the peer B server other than through tcp
     pub async fn setup_a(server: String,
-                       name: String,
-                       io_shared: &InputShared)
-                       -> io::Result<PeerClient> {
-
-        // client is peer type A which initiates a reaquest to an already running peer B
-        // client type A is not connected to the peer B server other than through tcp
+                         name: String,
+                         peer_name: String,
+                         io_shared: &InputShared)
+                         -> io::Result<PeerClient> {
 
         let client = TcpStream::connect(&server).await
             .map_err(|e| { error!("Unable to connect to server"); e })?;
@@ -71,7 +71,7 @@ impl PeerClient {
         let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
 
         let io_id: u16 = io_shared.get_next_id().await;
-        io_shared.notify(InputMsg::SwitchSession(io_id)).await.expect("Unable to send input msg");
+        io_shared.notify(InputMsg::NewSession(io_id, peer_name.clone())).await.expect("Unable to send input msg");
 
         info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}", &name, io_id, &server);
 
@@ -79,14 +79,13 @@ impl PeerClient {
     }
 
 
+    // client type B is the interative part of the peer type B server on the same node
+    // client type B is connected to the peer type B through channels
     pub async fn setup_b(client_rx: Receiver<PeerMsgType>,
                          server_tx: Sender<PeerMsgType>,
                          name: String,
                          io_shared: &InputShared)
                          -> io::Result<PeerClient> {
-
-        // client type B is the interative part of the peer type B server on the same node
-        // client type B is connected to the peer type B through channels
 
         // for communication between cmd line read and peer write
         let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
@@ -120,10 +119,11 @@ impl PeerClient {
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
-        let io_notify = io_shared.get_notifier();
+        let io_notify1 = io_shared.get_notifier();
+        let io_notify2 = io_shared.get_notifier();
 
         let peer_server_read_handle = tokio::spawn(async move {
-            reader.handle_peer_read(io_id).await;
+            reader.handle_peer_read(io_id, io_notify1).await;
         });
 
         let _peer_write_handle = tokio::spawn(async move {
@@ -158,7 +158,7 @@ impl PeerClient {
         peer_server_read_handle.await.unwrap();
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
-        io_notify.send(InputMsg::CloseSession(io_id)).await.expect("Unable to send close sesion msg");
+        io_notify2.send(InputMsg::CloseSession(io_id)).await.expect("Unable to send close sesion msg");
 
         info!("gonzo B");
 

@@ -2,9 +2,9 @@
 use std::io as stdio;
 use std::io::{stdout, Write};
 
-use std::sync::{Arc, /*Mutex, RwLock */};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use tokio::io;
 use tokio::select;
@@ -29,11 +29,12 @@ const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
 pub type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
-pub type IoIds = RwLock<HashSet<u16>>;
+pub type Sessions = RwLock<HashMap<u16, String>>;
 
 #[derive(Debug)]
 pub enum InputMsg {
-    SwitchSession(u16),
+    NewSession(u16, String),
+    UpdatedSessionName(u16, String),
     CloseSession(u16),
 }
 
@@ -94,25 +95,33 @@ impl InputHandler {
                         //            for line in stdin.lock().lines().map(|l| l.unwrap()) {
 
                         // handles terminal input switching
-                        if line.starts_with("\\switch") || line.starts_with("\\s") {
-                            if let Some(id_str) = line.splitn(3, ' ').skip(1).take(1).next() {
-                                let switch_id_str = id_str.to_owned(); // &str to String
-                                let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
-                                info!("Attempting to switch input to {}", &switch_id);
+                        match line.as_str() {
+                            "\\sessions" => {
+                                info!("Sessions request...");
+                                shared.display_sessions(current_id).await;
+                                continue;  // don't forward the sessions msg on
+                            },
+                            value if value.starts_with("\\switch") || value.starts_with("\\s") => {
+                                if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
+                                    let switch_id_str = id_str.to_owned(); // &str to String
+                                    let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
+                                    info!("Attempting to switch input to {}", &switch_id);
 
-                                // Local validation for valid id
-                                if shared.contains_id(&switch_id).await {
-                                    info!("Successful id and line switch, old id {} new id {}", current_id, switch_id);
-                                    // swap out old current id and line and replace with new
-                                    current_id = switch_id;
-                                    shared.switch_id_and_line(switch_id, &line).await;
-                                } else { // if switch_id not valid ignore and continue
-                                    info!("not a valid switch id");
+                                    // Local validation for valid id
+                                    if shared.contains_id(&switch_id).await {
+                                        info!("Successful id and line switch, old id {} new id {}", current_id, switch_id);
+                                        // swap out old current id and line and replace with new
+                                        current_id = switch_id;
+                                        shared.switch_id_and_line(switch_id, &line).await;
+                                    } else { // if switch_id not valid ignore and continue
+                                        info!("not a valid switch id");
+                                    }
                                 }
+                                continue; // don't forward the switch msg on if it was successful
                             }
-                            continue; // don't forward the switch msg on if it was successful
-                        } else {
-                            shared.switch_line(&line).await; // replace old line with new line
+                            _ => {
+                                shared.switch_line(&line).await; // replace old line with new line
+                            }
                         }
 
                         seq_no += 1;
@@ -124,10 +133,13 @@ impl InputHandler {
                     }
                     Some(msg) = msg_rx.recv() => {
                         match msg {
-                            InputMsg::SwitchSession(id) => {
-                                if shared.switch_session(id).await {
+                            InputMsg::NewSession(id, name) => {
+                                if shared.new_session(id, name).await {
                                     current_id = id;
                                 }
+                            },
+                            InputMsg::UpdatedSessionName(id, name) => {
+                                shared.update_session_name(id, name).await;
                             },
                             InputMsg::CloseSession(id) => {
                                 if shared.close_session(id).await {
@@ -193,7 +205,7 @@ impl InputHandler {
 
 pub struct InputBase {
     current: IdLinePair,
-    ids: IoIds,
+    sessions: Sessions,
     rx: InputReceiver,
     tx: InputNotifier,
     counter: AtomicU16,
@@ -206,14 +218,15 @@ pub struct InputShared {
 impl InputShared {
     pub fn new(seed_id: u16, rx: InputReceiver, tx: InputNotifier) -> Self {
         let current = RwLock::new((seed_id, String::from("empty")));
-        let ids = RwLock::new(HashSet::from([seed_id]));
+        //        let ids = RwLock::new(HashSet::from([seed_id]));
+        let sessions = RwLock::new(HashMap::from([(seed_id, String::from("main lobby"))]));
         let counter = AtomicU16::new(seed_id);
 
         InputShared{
             shared: Arc::new(
                 InputBase {
                     current,
-                    ids,
+                    sessions,
                     rx,
                     tx,
                     counter
@@ -234,30 +247,35 @@ impl InputShared {
         self.shared.rx.clone()
     }
 
-    /* Id methods */
     pub(crate) async fn get_next_id(&self) -> u16 {
         let new_id = self.shared.counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
-        self.shared.ids.write().await.insert(new_id);     // add to RwLock
+        if new_id != IO_ID_START {
+            self.shared.sessions.write().await.insert(new_id, String::new());     // add to RwLock
+        }
         new_id
     }
 
-    async fn switch_session(&self, io_id: u16) -> bool {
-        self.force_switch_id(io_id).await
+    async fn new_session(&self, io_id: u16, name: String) -> bool {
+        self.force_switch_id(io_id).await &&
+            self.shared.sessions.write().await.insert(io_id, name).is_some()
+    }
+
+    async fn update_session_name(&self, io_id: u16, name: String) -> bool {
+        self.shared.sessions.write().await.insert(io_id, name).is_some()
     }
 
     async fn close_session(&self, io_id: u16) -> bool {
-        let f1: bool = self.force_switch_id(IO_ID_START).await;
-        let f2: bool = self.remove_id(io_id).await; // remove peer client's io id
-        f1 && f2
+        self.force_switch_id(IO_ID_START).await &&
+            self.remove_id(io_id).await
     }
 
     // remove from RwLock
     async fn remove_id(&self, id: u16) -> bool {
-        self.shared.ids.write().await.remove(&id)
+        self.shared.sessions.write().await.remove(&id).is_some()
     }
 
     async fn contains_id(&self, id: &u16) -> bool {
-        self.shared.ids.read().await.contains(id)
+        self.shared.sessions.read().await.contains_key(id)
     }
 
     /* Current id and line methods */
@@ -306,6 +324,29 @@ impl InputShared {
             Some(s.clone())
         } else {
             None
+        }
+    }
+
+    async fn display_sessions(&self, current_id: u16) {
+        //let map_iter = self.shared.sessions.read().await.iter();
+        let mut prefix: &str = " ";
+        println!("<Active Sessions>");
+
+        for (k, v) in self.shared.sessions.read().await.iter() {
+
+            // if current session, mark with *
+            if *k == current_id {
+                prefix = "*";
+            }
+
+            if *k == IO_ID_START {
+                println!("{}{}, broadcast chat in {}", prefix, *k - IO_ID_OFFSET, v);
+            } else {
+                println!("{}{}, peer chat --> {}", prefix, *k - IO_ID_OFFSET, v);
+
+            }
+
+            prefix = " ";
         }
     }
 

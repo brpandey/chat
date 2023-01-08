@@ -11,7 +11,7 @@ use tracing::{info, debug};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 use crate::peer_types::PeerMsgType;
-use crate::input_handler::IO_ID_OFFSET;
+use crate::input_handler::{IO_ID_OFFSET, InputNotifier, InputMsg};
 
 type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
 type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
@@ -49,7 +49,7 @@ impl PeerReader {
     }
 
     // Loop to handle ongoing client msgs to server
-    pub async fn handle_peer_read(&mut self, io_id: u16) {
+    pub async fn handle_peer_read(&mut self, io_id: u16, io_notify: InputNotifier) {
         // In peer to peer mode, we have peer A and peer B,
         // peer A talks to peer B by sending a TCP message to B and B listens for messages
         // since peer A initiates the p2p session with peer B, it is the client in this instance
@@ -63,15 +63,15 @@ impl PeerReader {
             debug!("task A: listening to peer server replies...");
 
             match &mut self.read {
-                ReadHandle::A(ref mut fr) => br = Self::peer_read_a(&mut self.kill, fr, io_id).await,
-                ReadHandle::B(ref mut client_rx) => br = Self::peer_read_b(&mut self.kill, client_rx, io_id).await,
+                ReadHandle::A(ref mut fr) => br = Self::peer_read_a(&mut self.kill, fr).await,
+                ReadHandle::B(ref mut client_rx) => br = Self::peer_read_b(&mut self.kill, client_rx, io_id, &io_notify).await,
             }
 
             if br { break; }
         }
     }
 
-    async fn peer_read_a(kill: &mut ShutdownTx, fr: &mut FrRead, io_id: u16) -> bool {
+    async fn peer_read_a(kill: &mut ShutdownTx, fr: &mut FrRead) -> bool {
         // Type A code
         // Read lines from server via tcp if we are peer A in the above scenario
 
@@ -91,8 +91,6 @@ impl PeerReader {
                         let name_str = std::str::from_utf8(&name).unwrap_or_default();
                         let hello_msg = PEER_HELLO.replace("{}", &name_str).into_bytes();
                         println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
-                        println!("< To chat with {} peer, type: \\s {} (peer type A), to return to lobby type: \\s 0>",
-                                 &name_str, io_id - IO_ID_OFFSET);
                     },
                     Ok(ChatMsg::PeerB(Reply::Note(msg))) => {
                         println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
@@ -113,7 +111,8 @@ impl PeerReader {
         br
     }
 
-    async fn peer_read_b(kill: &mut ShutdownTx, client_rx: &mut Receiver<PeerMsgType>, io_id: u16) -> bool {
+    async fn peer_read_b(kill: &mut ShutdownTx, client_rx: &mut Receiver<PeerMsgType>,
+                         io_id: u16, io_notify: &InputNotifier) -> bool {
         // Type B code
         // Display server received message and as peer B respond as fit
         // via command line
@@ -131,7 +130,12 @@ impl PeerReader {
                         kill.send(SHUTDOWN).expect("Unable to send shutdown");
                         br = true;
                     },
-                    PeerMsgType::Hello(msg) => {
+                    PeerMsgType::Hello(name, msg) => {
+                        // since peer type b is create after tcp request name is not provided initially
+                        // hence record name given hello protocol msg
+                        io_notify.send(InputMsg::UpdatedSessionName(io_id, name))
+                            .await.expect("Unable to send close sesion msg");
+
                         println!("< {}, to chat, type: \\s {} (peer type B), to return to lobby, type: \\s 0 >",
                                  std::str::from_utf8(&msg).unwrap_or_default(), io_id - IO_ID_OFFSET);
                     },
@@ -140,6 +144,7 @@ impl PeerReader {
                     },
                 }
             }
+
             else => {
                 info!("No client transmitters, server must have dropped");
                 br = true;
