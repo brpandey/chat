@@ -6,13 +6,14 @@ use std::sync::{Arc, /*Mutex, RwLock */};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashSet;
 
+use tokio::io;
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender as MSender;
 use tokio::sync::mpsc::Receiver as MReceiver;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::watch::{self, Sender, Receiver};
-use tokio::io;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 
@@ -32,7 +33,7 @@ pub type IoIds = RwLock<HashSet<u16>>;
 
 #[derive(Debug)]
 pub enum InputMsg {
-    NewSession(u16),
+    SwitchSession(u16),
     CloseSession(u16),
 }
 
@@ -123,8 +124,8 @@ impl InputHandler {
                     }
                     Some(msg) = msg_rx.recv() => {
                         match msg {
-                            InputMsg::NewSession(id) => {
-                                if shared.new_session(id).await {
+                            InputMsg::SwitchSession(id) => {
+                                if shared.switch_session(id).await {
                                     current_id = id;
                                 }
                             },
@@ -163,7 +164,6 @@ impl InputHandler {
 
         {
             // keep borrowed scope small
-
             new_line = input_rx.changed().await.is_ok();
             seq_id = input_rx.borrow().0.clone();
             watch_id = input_rx.borrow().1.clone();
@@ -222,12 +222,16 @@ impl InputShared {
         }
     }
 
-    pub(crate) fn get_receiver(&self) -> InputReceiver {
-        self.shared.rx.clone()
+    pub(crate) async fn notify(&self, msg: InputMsg) -> Result<(), SendError<InputMsg>> {
+        self.shared.tx.send(msg).await
     }
 
     pub(crate) fn get_notifier(&self) -> InputNotifier {
         self.shared.tx.clone()
+    }
+
+    pub(crate) fn get_receiver(&self) -> InputReceiver {
+        self.shared.rx.clone()
     }
 
     /* Id methods */
@@ -237,7 +241,7 @@ impl InputShared {
         new_id
     }
 
-    async fn new_session(&self, io_id: u16) -> bool {
+    async fn switch_session(&self, io_id: u16) -> bool {
         self.force_switch_id(io_id).await
     }
 

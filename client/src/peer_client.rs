@@ -71,8 +71,7 @@ impl PeerClient {
         let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
 
         let io_id: u16 = io_shared.get_next_id().await;
-        let io_notifier = io_shared.get_notifier();
-        io_notifier.send(InputMsg::NewSession(io_id)).await.expect("xxx Unable to io_notifier tx");
+        io_shared.notify(InputMsg::SwitchSession(io_id)).await.expect("Unable to send input msg");
 
         info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}", &name, io_id, &server);
 
@@ -109,7 +108,6 @@ impl PeerClient {
         Ok(PeerClient {reader, writer, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
     }
 
-
     async fn send_hello(&mut self) {
         let msg = Ask::Hello(self.name.clone().into_bytes());
         self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
@@ -122,7 +120,7 @@ impl PeerClient {
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
-        let io_notifier = io_shared.get_notifier();
+        let io_notify = io_shared.get_notifier();
 
         let peer_server_read_handle = tokio::spawn(async move {
             reader.handle_peer_read(io_id).await;
@@ -160,7 +158,7 @@ impl PeerClient {
         peer_server_read_handle.await.unwrap();
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
-        io_notifier.send(InputMsg::CloseSession(io_id)).await.expect("xxx Unable to io_notifier tx");
+        io_notify.send(InputMsg::CloseSession(io_id)).await.expect("Unable to send close sesion msg");
 
         info!("gonzo B");
 
