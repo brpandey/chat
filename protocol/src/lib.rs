@@ -99,6 +99,7 @@ pub enum Reply { // b'}'
     Note(Vec<u8>), // b'<'
 }
 
+#[derive(Debug)]
 pub struct ChatCodec; // unit struct
 
 // convert bytes to ProtocolMsgType enum

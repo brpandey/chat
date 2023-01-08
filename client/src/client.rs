@@ -20,18 +20,11 @@ use tracing::{info, debug, error};
 use protocol::{ChatMsg, ChatCodec, Request, Response};
 
 use crate::peer_client::PeerClient;
-use crate::peer_server::PeerServerListener;
+use crate::peer_server::{PeerServerListener, PEER_SERVER, peer_port};
 use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n\n$ Please input chat name: ";
-
-const SERVER: &str = "127.0.0.1:43210";
-const PEER_SERVER: &str = "127.0.0.1";
-const PEER_SERVER_PORT0: u16 = 43310;
-const PEER_SERVER_PORT1: u16 = 43311;
-const PEER_SERVER_PORT2: u16 = 43312;
-const PEER_SERVER_PORT3: u16 = 43313;
-
+const MAIN_SERVER: &str = "127.0.0.1:43210";
 const SHUTDOWN: u8 = 1;
 
 pub struct Client {
@@ -70,9 +63,9 @@ impl Client {
     }
 
     pub async fn setup(io_shared: &InputShared) -> io::Result<Client> {
-        info!("Client starting, connecting to server {:?}", &SERVER);
+        info!("Client starting, connecting to server {:?}", &MAIN_SERVER);
 
-        let client = TcpStream::connect(SERVER).await
+        let client = TcpStream::connect(MAIN_SERVER).await
             .map_err(|e| { error!("Unable to connect to server"); e })?;
 
         // split tcpstream so we can hand off to r & w tasks
@@ -344,16 +337,3 @@ impl Client {
     }
 }
 
-
-/* Utility function(s) */
-
-// Stagger port value given num
-pub fn peer_port(num: u16) -> u16 {
-    match num % 4 {
-        0 => PEER_SERVER_PORT0,
-        1 => PEER_SERVER_PORT1,
-        2 => PEER_SERVER_PORT2,
-        3 => PEER_SERVER_PORT3,
-        _ => PEER_SERVER_PORT0,
-    }
-}

@@ -10,6 +10,13 @@ use crate::input_handler::InputShared;
 
 use tracing::info;
 
+pub const PEER_SERVER: &str = "127.0.0.1";
+const PEER_SERVER_PORT0: u16 = 43310;
+const PEER_SERVER_PORT1: u16 = 43311;
+const PEER_SERVER_PORT2: u16 = 43312;
+const PEER_SERVER_PORT3: u16 = 43313;
+
+
 pub struct PeerServerListener;
 
 impl PeerServerListener {
@@ -50,5 +57,19 @@ impl PeerServerListener {
                 }
             }
         });
+    }
+}
+
+
+/* Utility function(s) */
+
+// Stagger port value given num
+pub fn peer_port(id: u16) -> u16 {
+    match id % 4 {
+        0 => PEER_SERVER_PORT0,
+        1 => PEER_SERVER_PORT1,
+        2 => PEER_SERVER_PORT2,
+        3 => PEER_SERVER_PORT3,
+        _ => PEER_SERVER_PORT0,
     }
 }
