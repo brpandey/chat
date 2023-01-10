@@ -102,8 +102,12 @@ impl PeerReader {
                     },
                 }
             }
-            else => {
+/*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
+                br = true;
+            }
+*/            else => {
                 info!("Peer Server Remote has closed");
+                kill.send(SHUTDOWN).expect("Unable to send shutdown");
                 br = true;
             }
         }
@@ -144,9 +148,12 @@ impl PeerReader {
                     },
                 }
             }
-
-            else => {
+/*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
+                br = true;
+            }
+*/            else => {
                 info!("No client transmitters, server must have dropped");
+                kill.send(SHUTDOWN).expect("Unable to send shutdown");
                 br = true;
             }
         }

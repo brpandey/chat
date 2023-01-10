@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
 
-use tokio::io;
+use tokio::io::{self, Error, ErrorKind};
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
@@ -83,7 +83,7 @@ impl InputHandler {
         let mut seq_no = 0;
 
         tokio::spawn(async move {
-
+            let mut quit = false;
             loop {
                 let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
                 //            let stdin = io::stdin();
@@ -118,7 +118,11 @@ impl InputHandler {
                                     }
                                 }
                                 continue; // don't forward the switch msg on if it was successful
-                            }
+                            },
+                            "\\quit" => {
+                                info!("Input handler received quit.. aborting but passing on first");
+                                quit = true;
+                            },
                             _ => {
                                 shared.switch_line(&line).await; // replace old line with new line
                             }
@@ -130,6 +134,11 @@ impl InputHandler {
 
                         // notify that a new line has been received (changing seq no) along with the current id
                         watch_tx.send((seq_no, current_id)).expect("Unable to send value on watch channel");
+
+                        if quit {
+                            drop(watch_tx);
+                            return
+                        }
                     }
                     Some(msg) = msg_rx.recv() => {
                         match msg {
@@ -190,16 +199,18 @@ impl InputHandler {
                 }
                 else {
                     info!("checkpoint A.2 current id didn't match arc current rwlock hence no line to provide");
+                    return Ok(None);
                 }
             } else {
                 info!("current_id {} doesn't match watch_id {} from watch channel", current_id, watch_id);
+                return Ok(None);
             }
         }
-        else {
-            info!("checkpoint B.2 no new line received ");
-        }
 
-        return Ok(None)
+        info!("checkpoint B.2 no new line received");
+
+//            return Ok(Some("wakawaka".to_string()))
+        return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
     }
 }
 

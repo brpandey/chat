@@ -2,6 +2,7 @@ use tokio::select;
 use tokio::sync::{broadcast};
 use tokio::sync::mpsc::{self, Sender, Receiver};
 use tokio::sync::broadcast::Receiver as BReceiver;
+use tokio::sync::broadcast::Sender as BSender;
 use tokio_util::codec::{/*LinesCodec,*/ FramedRead, FramedWrite};
 use tokio::net::TcpStream;
 use tokio::io::{self}; //, empty, sink}; 
@@ -13,12 +14,15 @@ use crate::peer_types::PeerMsgType;
 use crate::peer_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
 use crate::input_handler::{InputMsg, InputHandler, InputShared};
 
+const SHUTDOWN: u8 = 1;
+
 //#[derive(Debug)]
 pub struct PeerClient {
     reader: Option<PeerReader>,
     writer: Option<PeerWriter>,
     local_tx: Option<Sender<Ask>>,
     shutdown_rx: Option<BReceiver<u8>>,
+    shutdown_tx: Option<BSender<u8>>,
     name: String,
     io_id: u16,
 }
@@ -67,7 +71,7 @@ impl PeerClient {
 
         let rh = ReadHandle::A(FramedRead::new(cl_read, ChatCodec));
         let wh = WriteHandle::A(FramedWrite::new(cl_write, ChatCodec));
-        let reader = Some(PeerReader::new(rh, sd_tx));
+        let reader = Some(PeerReader::new(rh, sd_tx.clone()));
         let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
 
         let io_id: u16 = io_shared.get_next_id().await;
@@ -75,7 +79,7 @@ impl PeerClient {
 
         info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}", &name, io_id, &server);
 
-        Ok(PeerClient {reader, writer, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
+        Ok(PeerClient {reader, writer, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), shutdown_tx: Some(sd_tx), name, io_id})
     }
 
 
@@ -97,14 +101,15 @@ impl PeerClient {
 
         let rh = ReadHandle::B(client_rx);
         let wh = WriteHandle::B(server_tx);
-        let reader = Some(PeerReader::new(rh, sd_tx));
+        let reader = Some(PeerReader::new(rh, sd_tx.clone()));
         let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
 
         let io_id: u16 = io_shared.get_next_id().await;
 
         info!("New peer client B, name: {} io_id: {}, set up local channel to local peer server", &name, io_id);
 
-        Ok(PeerClient {reader, writer, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), name, io_id})
+        Ok(PeerClient {reader, writer, local_tx: Some(local_tx),
+                       shutdown_rx: Some(sd_rx2), shutdown_tx: Some(sd_tx), name, io_id})
     }
 
     async fn send_hello(&mut self) {
@@ -116,6 +121,7 @@ impl PeerClient {
         let mut reader = self.reader.take().unwrap();
         let mut writer = self.writer.take().unwrap();
         let local_tx = self.local_tx.clone().unwrap();
+        let shutdown_tx = self.shutdown_tx.take().unwrap();
         let mut shutdown_rx = self.shutdown_rx.take().unwrap();
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
@@ -137,13 +143,20 @@ impl PeerClient {
                 info!("task peer cmd line read: input looping");
 
                 select! {
-                    Ok(msg) = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared) => {
-                        let req = PeerClient::parse_input(&name, msg);
-                        if req != Ask::Noop {
-                            info!("about to send peer client cmd line input request data on local_tx");
-                            local_tx.send(req).await.expect("xxx Unable to tx");
-                        } else {
-                            info!("noop hence no local tx send");
+                    input = async {
+                        let req = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared).await?
+                            .and_then(|m| PeerClient::parse_input(&name, m));
+
+                        if req.is_some() {
+                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                        }
+
+                        Ok::<_, io::Error>(())
+                    } => {
+                        if input.is_err() { // if input handler has received a terminate
+                            info!("sending shutdown msg C");
+                            shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            return
                         }
                     }
                     _ = shutdown_rx.recv() => { // exit task if shutdown received
@@ -167,12 +180,11 @@ impl PeerClient {
         info!("gonzo C");
     }
 
-    pub fn parse_input(name: &str, line: Option<String>) -> Ask {
-        if line.is_none() { return Ask::Noop }
-        match line.unwrap().as_str() {
-            "\\leave" => {
+    pub fn parse_input(name: &str, line: String) -> Option<Ask> {
+        match line.as_str() {
+            "\\leave" | "\\quit" => {
                 info!("Private session ended by user {}", name);
-                return Ask::Leave(name.as_bytes().to_vec());
+                return Some(Ask::Leave(name.as_bytes().to_vec()));
             },
             l => {
                 info!("not a peerclient command message");
@@ -180,7 +192,7 @@ impl PeerClient {
                 let mut out = vec![];
                 out.push(format!("<{}> ", name).into_bytes());
                 let msg = InputHandler::interleave_newlines(l, out);
-                return Ask::Note(msg)
+                return Some(Ask::Note(msg))
             },
         }
     }

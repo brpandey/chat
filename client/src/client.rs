@@ -120,14 +120,12 @@ impl Client {
         // start up peer server for clients that connect to this node for peer to peer chat.
         PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared);
 
-        loop {
-            select! {
-                _ = self.shutdown_rx.recv() => { // exit task if shutdown received
-                    info!("received final shutdown");
-                    break;
-                }
-            };
-        }
+        select! {
+            _ = self.shutdown_rx.recv() => { // exit task if shutdown received
+                info!("received final shutdown");
+//                break;
+            }
+        };
 
 /*
         select! {
@@ -152,20 +150,18 @@ impl Client {
             info!("peer client completed {:?}", res);
         }
 
-        info!("waka waka!");
+        info!("Thank you and good bye!");
 
         Ok(())
     }
-
 
     pub fn spawn_read(&mut self, io_shared: InputShared) {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
         let peer_set = Arc::clone(self.peer_clients.as_mut().unwrap());
         let shutdown_tx = self.shutdown_tx.clone();
-//        let shutdown_rx = self.shutdown_tx.subscribe();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
         let mut fr = self.fr.take().unwrap();
-//        let client_id = self.id;
 
         let _server_read_handle = tokio::spawn(async move {
             loop {
@@ -203,9 +199,6 @@ impl Client {
                                 peer_set
                                     .lock().await
                                     .spawn(PeerClient::nospawn_a(addr_string, client_name.clone(), peer_name, io_shared.clone()));
-
-                                // should probably set some cond var that blocks other threads from reading from stdin
-                                // until user explicitly switches to client -> server mode
                             },
                             Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                                 println!(">>> Unable to fork into private session as peer {} unavailable",
@@ -218,13 +211,10 @@ impl Client {
                             }
                         }
                     } // exit task if shutdown received
-
-                    /*
                     _ = shutdown_rx.recv() => {
                         info!("server_read_handle received shutdown, returning!");
                         return;
                     }
-                     */
                     else => {
                         info!("Server Remote has closed");
                         info!("sending shutdown msg A");
@@ -239,7 +229,6 @@ impl Client {
 
     pub fn spawn_write(&mut self) {
         let mut local_rx = self.local_rx.take().unwrap();
-//        let shutdown_tx = self.shutdown_tx.clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let mut fw = self.fw.take().unwrap();
 
@@ -255,13 +244,6 @@ impl Client {
                         info!("tcp_write_handle received shutdown, returning!");
                         return;  // exit task if shutdown received
                     }
-                    /*
-                    else => {
-                        shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
-                        info!("sending shutdown msg B");
-                        break;
-                    }
-                     */
                 }
             }
         });
@@ -277,63 +259,55 @@ impl Client {
         // Use current thread to loop and grab data from command line
         let _cmd_line_handle = tokio::spawn(async move {
             loop {
-                debug!("task C: cmd line input looping");
-
                 select! {
-                    Ok(msg) = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared) => {
-                        let req = Client::parse_input(msg);
-                        if req != Request::Noop {
-                            local_tx.send(req).await.expect("xxx Unable to tx");
+                    input = async {
+                        let req = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared).await?
+                            .and_then(Client::parse_input);
+
+                        if req.is_some() {
+                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                        }
+
+                        Ok::<_, io::Error>(())
+                    } => {
+                        if input.is_err() { // if input handler has received a terminate
+                            info!("sending shutdown msg C");
+                            shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            return
                         }
                     }
                     _ = shutdown_rx.recv() => {
                         info!("cmd_line_handle received shutdown, returning!");
                         break; // exit task if shutdown received
                     }
-                    else => {
-                        shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
-                        info!("sending shutdown msg C");
-                        break;
-                    }
                 }
-
-                /*
-                // If main server is dead, stop accepting cmd line input
-                if !server_alive_ref2.load(Ordering::Relaxed) {
-                debug!("Server not alive, hence exiting cmd line processing");
-                break;
-                 */
-
             }
         });
     }
 
-    pub fn parse_input(line: Option<String>) -> Request {
-        if line.is_none() { return Request::Noop }
-
-        match line.unwrap().as_str() {
+    pub fn parse_input(line: String) -> Option<Request> {
+        match line.as_str() {
             "\\quit" => {
                 info!("Session terminated by user...");
-                return Request::Quit
+                return Some(Request::Quit)
             },
             "\\users" => {
-                return Request::Users
+                return Some(Request::Users)
             },
             value if value.starts_with("\\fork") => {
                 if let Some(name) = value.splitn(3, ' ').skip(1).take(1).next() {
                     let name: Vec<u8> = name.as_bytes().to_owned();
                     info!("Attempting to fork a session with {}", std::str::from_utf8(&name).unwrap_or_default());
-                    return Request::ForkPeer{name}
+                    return Some(Request::ForkPeer{name})
                 } else {
-                    return Request::Noop
+                    return None
                 }
             },
             l => {
                 // if no commands, split up user input
                 let msg = InputHandler::interleave_newlines(l, vec![]);
-                return Request::Message(msg)
+                return Some(Request::Message(msg))
             },
         }
     }
 }
-
