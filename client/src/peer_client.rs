@@ -3,9 +3,8 @@ use tokio::io;
 use tokio::sync::mpsc::{Sender, Receiver};
 
 use protocol::Ask;
-
+use crate::builder::PeerClientBuilder as Builder;
 use crate::peer_types::PeerMsgType;
-use crate::peer_client_builder::Builder;
 use crate::input_handler::{InputMsg, InputHandler, InputShared};
 
 use tracing::{info, /*debug, error */};

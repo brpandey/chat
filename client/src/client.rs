@@ -1,24 +1,17 @@
 use std::sync::{Arc, /*Mutex*/};
-
 use tokio::select;
-use tokio::net::{tcp, TcpStream};
 use tokio::sync::Mutex;
-use tokio::sync::{broadcast};
-
 use tokio::io::{self, Error, ErrorKind}; //, AsyncWriteExt}; //, AsyncReadExt};
-use tokio_util::codec::{FramedRead, FramedWrite, /*LinesCodec*/};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 use tokio::task::{JoinSet, JoinHandle};
-use tokio::sync::mpsc::{self, Sender, Receiver};
-use tokio::sync::broadcast::Sender as BSender;
-use tokio::sync::broadcast::Receiver as BReceiver;
 
 //use tracing_subscriber::fmt;
-use tracing::{info, debug, error};
+use tracing::{info, debug, /*error*/};
 
-use protocol::{ChatMsg, ChatCodec, Request, Response};
+use protocol::{ChatMsg, Request, Response};
 
+use crate::builder::ClientBuilder as Builder;
 use crate::peer_client::PeerClient;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, peer_port};
 use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
@@ -32,20 +25,11 @@ pub struct Client {
     io_id: u16,
     name: String,
     peer_clients: Option<Arc<Mutex<JoinSet<u8>>>>,
-    shutdown_tx: BSender<u8>,
-    shutdown_rx: BReceiver<u8>,
-    fr: Option<FramedRead<tcp::OwnedReadHalf, ChatCodec>>,
-    fw: Option<FramedWrite<tcp::OwnedWriteHalf, ChatCodec>>,
-    local_rx: Option<Receiver<Request>>,
-    local_tx: Option<Sender<Request>>,
+    builder: Builder,
 }
 
 impl Client {
-    pub fn new(fr: Option<FramedRead<tcp::OwnedReadHalf, ChatCodec>>,
-               fw: Option<FramedWrite<tcp::OwnedWriteHalf, ChatCodec>>, io_id: u16) -> Self {
-
-        let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
-        let (local_tx, local_rx) = mpsc::channel::<Request>(64);
+    pub fn new(io_id: u16, builder: Builder) -> Self {
         let peer_clients = Some(Arc::new(Mutex::new(JoinSet::new())));
 
         Client {
@@ -53,42 +37,31 @@ impl Client {
             io_id,
             name: String::new(),
             peer_clients,
-            shutdown_tx,
-            shutdown_rx,
-            fr,
-            fw,
-            local_tx: Some(local_tx),
-            local_rx: Some(local_rx),
+            builder,
         }
     }
 
-    pub async fn setup(io_shared: &InputShared) -> io::Result<Client> {
-        info!("Client starting, connecting to server {:?}", &MAIN_SERVER);
+    // Utilize builder to construct client target structure
+    pub async fn build(io_shared: &InputShared) -> io::Result<Client> {
+        let client = Builder::new()
+            .connect(&MAIN_SERVER).await?
+            .channels()
+            .io_register(io_shared).await
+            .build();
 
-        let client = TcpStream::connect(MAIN_SERVER).await
-            .map_err(|e| { error!("Unable to connect to server"); e })?;
-
-        // split tcpstream so we can hand off to r & w tasks
-        let (client_read, client_write) = client.into_split();
-
-        let fr = FramedRead::new(client_read, ChatCodec);
-        let fw = FramedWrite::new(client_write, ChatCodec);
-
-        let io_id = io_shared.get_next_id().await;
-
-        Ok(Client::new(Some(fr), Some(fw), io_id))
+        Ok(client)
     }
 
     pub async fn register(&mut self) -> io::Result<()> {
         if let Ok(Some(name)) = InputHandler::read_sync_user_input(GREETINGS) {
-            self.fw.as_mut().unwrap().send(Request::JoinName(name))
+            self.builder.fw.as_mut().unwrap().send(Request::JoinName(name))
                 .await.expect("Unable to write to server");
         } else {
             debug!("Unable to retrieve user chat name");
             return Err(Error::new(ErrorKind::Other, "Unable to retrieve user chat name"));
         }
 
-        if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.fr.as_mut().unwrap().next().await {
+        if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.builder.fr.as_mut().unwrap().next().await {
             println!(">>> Registered as name: {}, switch id is {}", std::str::from_utf8(&name).unwrap(), self.io_id - IO_ID_OFFSET);
             self.name = String::from_utf8(name).unwrap_or_default();
             self.id = id;
@@ -101,7 +74,7 @@ impl Client {
 
     pub fn spawn(io_shared: InputShared) -> JoinHandle<()> {
         tokio::spawn(async move {
-            if let Ok(mut c) = Client::setup(&io_shared).await {
+            if let Ok(mut c) = Client::build(&io_shared).await {
                 if c.register().await.is_ok() {
                     c.run(io_shared).await.expect("client terminated with an error");
                 }
@@ -120,8 +93,10 @@ impl Client {
         // start up peer server for clients that connect to this node for peer to peer chat.
         PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared);
 
+        let (_, mut shutdown_rx) = self.builder.shutdown_handles();
+
         select! {
-            _ = self.shutdown_rx.recv() => { // exit task if shutdown received
+            _ = shutdown_rx.recv() => { // exit task if shutdown received
                 info!("received final shutdown");
 //                break;
             }
@@ -159,9 +134,9 @@ impl Client {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
         let peer_set = Arc::clone(self.peer_clients.as_mut().unwrap());
-        let shutdown_tx = self.shutdown_tx.clone();
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let mut fr = self.fr.take().unwrap();
+
+        let mut fr = self.builder.take_read();
+        let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
 
         let _server_read_handle = tokio::spawn(async move {
             loop {
@@ -228,9 +203,8 @@ impl Client {
     }
 
     pub fn spawn_write(&mut self) {
-        let mut local_rx = self.local_rx.take().unwrap();
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let mut fw = self.fw.take().unwrap();
+        let (mut fw, mut local_rx) = self.builder.take_write_fields();
+        let (_, mut shutdown_rx) = self.builder.shutdown_handles();
 
         // Spawn client tcp write tokio task, to send data to server
         let _tcp_write_handle = tokio::spawn(async move {
@@ -250,11 +224,13 @@ impl Client {
     }
 
     pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared) {
-        let local_tx = self.local_tx.take().unwrap();
-        let shutdown_tx = self.shutdown_tx.clone();
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let mut input_rx = io_shared.get_receiver();
+        // grab io related data
         let io_id = self.io_id;
+        let mut input_rx = io_shared.get_receiver();
+
+        // get builder fields
+        let local_tx = self.builder.take_tx();
+        let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
 
         // Use current thread to loop and grab data from command line
         let _cmd_line_handle = tokio::spawn(async move {
@@ -311,3 +287,4 @@ impl Client {
         }
     }
 }
+

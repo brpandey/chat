@@ -3,18 +3,23 @@ use tokio::sync::{broadcast};
 use tokio::sync::mpsc::{self, Sender, Receiver};
 use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio::sync::broadcast::Sender as BSender;
-use tokio_util::codec::{/*LinesCodec,*/ FramedRead, FramedWrite};
-use tokio::net::TcpStream;
+use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio::net::{tcp, TcpStream};
 
-use protocol::{Ask, ChatCodec};
+type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
+type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
+
+use protocol::{Request, Ask, ChatCodec};
+
+use crate::client::Client;
 use crate::peer_client::PeerClient;
 use crate::peer_types::PeerMsgType;
 use crate::peer_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
 use crate::input_handler::{InputMsg, InputShared};
 
-use tracing::error;
+use tracing::{info, error};
 
-pub struct Builder {
+pub struct PeerClientBuilder {
     name: Option<String>,
     rh: Option<ReadHandle>,
     wh: Option<WriteHandle>,
@@ -27,7 +32,7 @@ pub struct Builder {
 }
 
 // Builder provides a simpler, reusable and pipelined interface when constructing Peer Client structure
-impl Builder {
+impl PeerClientBuilder {
     pub fn new(name: String) -> Self {
         Self {
             name: Some(name),
@@ -42,7 +47,7 @@ impl Builder {
         }
     }
 
-    // Used for PeerClient type A
+    // Used for PeerClient type A to connect to remote server
     pub async fn connect(mut self, server: &str) -> io::Result<Self> {
         let client = TcpStream::connect(server).await
             .map_err(|e| { error!("Unable to connect to server"); e })?;
@@ -56,7 +61,7 @@ impl Builder {
         Ok(self)
     }
 
-    // Used for PeerClient type B
+    // Used for PeerClient type B to link up with local server
     pub fn connect_local(mut self, client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>) -> Self {
         // stash r+w handles
         self.rh = Some(ReadHandle::B(client_rx));
@@ -118,4 +123,90 @@ impl Builder {
 }
 
 
+pub struct ClientBuilder {
+    shutdown_tx: Option<BSender<u8>>,
+    shutdown_rx: Option<BReceiver<u8>>,
+    pub fr: Option<FrRead>,
+    pub fw: Option<FrWrite>,
+    local_rx: Option<Receiver<Request>>,
+    local_tx: Option<Sender<Request>>,
+    io_id: u16,
+}
 
+impl ClientBuilder {
+    pub fn new() -> Self {
+        // create a not used channel for init purposes
+//        let (dummy_tx, dummy_rx) = broadcast::channel(1);
+
+        Self {
+            shutdown_tx: None, //dummy_tx,
+            shutdown_rx: None, // dummy_rx,
+            fr: None,
+            fw: None,
+            local_rx: None,
+            local_tx: None,
+            io_id: u16::default(),
+        }
+    }
+
+    // Connect to remote server
+    pub async fn connect(mut self, server: &str) -> io::Result<Self> {
+        info!("Client starting, connecting to server {:?}", server);
+
+        let client = TcpStream::connect(server).await
+            .map_err(|e| { error!("Unable to connect to server"); e })?;
+
+        // split tcpstream so we can hand off to r & w tasks
+        let (tcp_read, tcp_write) = client.into_split();
+
+        self.fr = Some(FramedRead::new(tcp_read, ChatCodec));
+        self.fw = Some(FramedWrite::new(tcp_write, ChatCodec));
+
+        Ok(self)
+    }
+
+    // Setup channels support
+    pub fn channels(mut self) -> Self {
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
+        self.shutdown_tx = Some(shutdown_tx);
+        self.shutdown_rx = Some(shutdown_rx);
+
+        let (local_tx, local_rx) = mpsc::channel::<Request>(64);
+        self.local_tx = Some(local_tx);
+        self.local_rx = Some(local_rx);
+
+        self
+    }
+
+    // Register new io id 
+    pub async fn io_register(mut self, io_shared: &InputShared) -> Self {
+        self.io_id = io_shared.get_next_id().await;
+        self
+    }
+
+    // Build target structure (Client) from builder and move builder into target
+    pub fn build(self) -> Client {
+        Client::new(
+            self.io_id,
+            self
+        )
+    }
+
+    // retrieval methods
+
+    pub fn shutdown_handles(&mut self) -> (BSender<u8>, BReceiver<u8>) {
+        (self.shutdown_tx.as_mut().unwrap().clone(), self.shutdown_tx.as_mut().unwrap().subscribe())
+    }
+
+    pub fn take_read(&mut self) -> FrRead {
+        self.fr.take().unwrap()
+    }
+
+    pub fn take_write_fields(&mut self) -> (FrWrite, Receiver<Request>) {
+        (self.fw.take().unwrap(), self.local_rx.take().unwrap())
+    }
+
+    pub fn take_tx(&mut self) -> Sender<Request> {
+        self.local_tx.take().unwrap()
+    }
+}
