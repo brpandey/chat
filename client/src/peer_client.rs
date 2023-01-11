@@ -1,35 +1,37 @@
 use tokio::select;
-use tokio::sync::{broadcast};
-use tokio::sync::mpsc::{self, Sender, Receiver};
-use tokio::sync::broadcast::Receiver as BReceiver;
-use tokio::sync::broadcast::Sender as BSender;
-use tokio_util::codec::{/*LinesCodec,*/ FramedRead, FramedWrite};
-use tokio::net::TcpStream;
-use tokio::io::{self}; //, empty, sink}; 
+use tokio::io;
+use tokio::sync::mpsc::{Sender, Receiver};
 
-use tracing::{info, /*debug, */ error};
+use protocol::Ask;
 
-use protocol::{Ask, ChatCodec};
 use crate::peer_types::PeerMsgType;
-use crate::peer_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
+use crate::peer_client_builder::Builder;
 use crate::input_handler::{InputMsg, InputHandler, InputShared};
+
+use tracing::{info, /*debug, error */};
 
 const SHUTDOWN: u8 = 1;
 
 //#[derive(Debug)]
 pub struct PeerClient {
-    reader: Option<PeerReader>,
-    writer: Option<PeerWriter>,
-    local_tx: Option<Sender<Ask>>,
-    shutdown_rx: Option<BReceiver<u8>>,
-    shutdown_tx: Option<BSender<u8>>,
     name: String,
     io_id: u16,
+    local_tx: Option<Sender<Ask>>,
+    builder: Builder,
 }
 
 impl PeerClient {
+    pub fn new(name: String, io_id: u16, local_tx: Option<Sender<Ask>>, builder: Builder) -> Self {
+        Self {
+            name,
+            io_id,
+            local_tx,
+            builder,
+        }
+    }
+
     pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> u8 {
-        if let Ok(mut client) = PeerClient::setup_a(server, name, peer_name, &io_shared).await {
+        if let Ok(mut client) = PeerClient::build_a(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
             client.run(io_shared).await;
@@ -41,7 +43,7 @@ impl PeerClient {
     pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
                    name: String, io_shared: InputShared) {
         let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::setup_b(client_rx, server_tx, name, &io_shared).await {
+            if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
                 client.run(io_shared).await;
             }
         });
@@ -49,67 +51,42 @@ impl PeerClient {
 
     // client is peer type A which initiates a reaquest to an already running peer B
     // client type A is not connected to the peer B server other than through tcp
-    pub async fn setup_a(server: String,
-                         name: String,
-                         peer_name: String,
-                         io_shared: &InputShared)
-                         -> io::Result<PeerClient> {
+    pub async fn build_a(server: String,
+                           name: String,
+                           peer_name: String,
+                           io_shared: &InputShared) -> io::Result<PeerClient> {
 
-        let client = TcpStream::connect(&server).await
-            .map_err(|e| { error!("Unable to connect to server"); e })?;
+        let client = Builder::new(name)
+            .connect(&server).await?
+            .channels()
+            .io_register_notify(io_shared, &peer_name).await
+            .build();
 
-        // split tcpstream so we can hand off to r & w tasks
-        let (cl_read, cl_write) = client.into_split();
+        info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}",
+              &client.name, client.io_id, &server);
 
-        // for communication between cmd line read and peer write
-        let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
-
-        // for all peer client tasks shutdown (e.g. user has disconnected or peer user has disconnected)
-        let (sd_tx, sd_rx1) = broadcast::channel(16);
-
-        let sd_rx2 = sd_tx.subscribe();
-
-        let rh = ReadHandle::A(FramedRead::new(cl_read, ChatCodec));
-        let wh = WriteHandle::A(FramedWrite::new(cl_write, ChatCodec));
-        let reader = Some(PeerReader::new(rh, sd_tx.clone()));
-        let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
-
-        let io_id: u16 = io_shared.get_next_id().await;
-        io_shared.notify(InputMsg::NewSession(io_id, peer_name.clone())).await.expect("Unable to send input msg");
-
-        info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}", &name, io_id, &server);
-
-        Ok(PeerClient {reader, writer, local_tx: Some(local_tx), shutdown_rx: Some(sd_rx2), shutdown_tx: Some(sd_tx), name, io_id})
+        Ok(client)
     }
 
 
     // client type B is the interative part of the peer type B server on the same node
     // client type B is connected to the peer type B through channels
-    pub async fn setup_b(client_rx: Receiver<PeerMsgType>,
+    pub async fn build_b(client_rx: Receiver<PeerMsgType>,
                          server_tx: Sender<PeerMsgType>,
                          name: String,
                          io_shared: &InputShared)
                          -> io::Result<PeerClient> {
 
-        // for communication between cmd line read and peer write
-        let (local_tx, local_rx) = mpsc::channel::<Ask>(64);
+        let client = Builder::new(name)
+            .connect_local(client_rx, server_tx)
+            .channels()
+            .io_register(io_shared).await
+            .build();
 
-        // for all peer client tasks shutdown (e.g. user has disconnected or peer user has disconnected)
-        let (sd_tx, sd_rx1) = broadcast::channel(16);
+        info!("New peer client B, name: {} io_id: {}, set up local channel to local peer server",
+              &client.name, client.io_id);
 
-        let sd_rx2 = sd_tx.subscribe();
-
-        let rh = ReadHandle::B(client_rx);
-        let wh = WriteHandle::B(server_tx);
-        let reader = Some(PeerReader::new(rh, sd_tx.clone()));
-        let writer = Some(PeerWriter::new(wh, local_rx, sd_rx1));
-
-        let io_id: u16 = io_shared.get_next_id().await;
-
-        info!("New peer client B, name: {} io_id: {}, set up local channel to local peer server", &name, io_id);
-
-        Ok(PeerClient {reader, writer, local_tx: Some(local_tx),
-                       shutdown_rx: Some(sd_rx2), shutdown_tx: Some(sd_tx), name, io_id})
+        Ok(client)
     }
 
     async fn send_hello(&mut self) {
@@ -118,15 +95,17 @@ impl PeerClient {
     }
 
     async fn run(&mut self, io_shared: InputShared) {
-        let mut reader = self.reader.take().unwrap();
-        let mut writer = self.writer.take().unwrap();
-        let local_tx = self.local_tx.clone().unwrap();
-        let shutdown_tx = self.shutdown_tx.take().unwrap();
-        let mut shutdown_rx = self.shutdown_rx.take().unwrap();
+        // grab builder fields
+        let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.builder.take_fields();
+
+        // grab self field data
+        let name = self.name.clone();
         let io_id = self.io_id;
+        let local_tx = self.local_tx.clone().unwrap();
+
+        // grab input handler related data
         let mut input_rx = io_shared.get_receiver();
-        let io_notify1 = io_shared.get_notifier();
-        let io_notify2 = io_shared.get_notifier();
+        let (io_notify1, io_notify2) = (io_shared.get_notifier(), io_shared.get_notifier());
 
         let peer_server_read_handle = tokio::spawn(async move {
             reader.handle_peer_read(io_id, io_notify1).await;
@@ -136,7 +115,6 @@ impl PeerClient {
             writer.handle_peer_write().await;
         });
 
-        let name = self.name.clone();
         // Use current thread to loop and grab data from command line
         let cmd_line_handle = tokio::spawn(async move {
             loop {
