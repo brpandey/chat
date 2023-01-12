@@ -1,5 +1,5 @@
-use tokio::select;
 use tokio::io;
+use tokio::select;
 use tokio::sync::mpsc::{Sender, Receiver};
 
 use protocol::Ask;
@@ -29,23 +29,27 @@ impl PeerClient {
         }
     }
 
-    pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> u8 {
+    pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> () {
+
         if let Ok(mut client) = PeerClient::build_a(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
             client.run(io_shared).await;
         }
 
-        42 // the meaning of life
+        ()
     }
 
-    pub fn spawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
-                   name: String, io_shared: InputShared) {
-        let _h = tokio::spawn(async move {
-            if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
-                client.run(io_shared).await;
-            }
-        });
+    pub async fn nospawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
+                   name: String, io_shared: InputShared) -> () {
+
+//        let _h = tokio::spawn(async move {
+        if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
+            client.run(io_shared).await;
+        }
+        //        });
+
+        ()
     }
 
     // client is peer type A which initiates a reaquest to an already running peer B
@@ -66,7 +70,6 @@ impl PeerClient {
 
         Ok(client)
     }
-
 
     // client type B is the interative part of the peer type B server on the same node
     // client type B is connected to the peer type B through channels

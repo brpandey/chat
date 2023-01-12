@@ -3,24 +3,17 @@ use tokio::sync::mpsc;
 
 use std::io::ErrorKind;
 
-use crate::peer_client::PeerClient;
+use crate::peer_set::PeerSet;
 use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::peer_types::PeerMsgType;
 use crate::input_handler::InputShared;
 
 use tracing::info;
 
-pub const PEER_SERVER: &str = "127.0.0.1";
-const PEER_SERVER_PORT0: u16 = 43310;
-const PEER_SERVER_PORT1: u16 = 43311;
-const PEER_SERVER_PORT2: u16 = 43312;
-const PEER_SERVER_PORT3: u16 = 43313;
-
-
 pub struct PeerServerListener;
 
 impl PeerServerListener {
-    pub fn spawn_accept(addr: String, name: String, io_shared: InputShared) {
+    pub fn spawn_accept(addr: String, name: String, io_shared: InputShared, mut peer_set: PeerSet) {
         let _h = tokio::spawn(async move {
 
             info!("Client peer server starting {:?}", &addr);
@@ -47,8 +40,7 @@ impl PeerServerListener {
 
                     // For each new peer that wants to connect with this node e.g. N1
                     // spawn a separate peer client of type B that locally communicates with peer server
-                    // of type B
-                    PeerClient::spawn_b(client_rx, server_tx, name.clone(), io_shared.clone());
+                    peer_set.spawn_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
 
                     let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
                     handler.spawn().await;
@@ -61,15 +53,33 @@ impl PeerServerListener {
 }
 
 
-/* Utility function(s) */
+pub const PEER_SERVER: &str = "127.0.0.1";
+const PEER_SERVER_PORT0: u16 = 43310;
+const PEER_SERVER_PORT1: u16 = 43311;
+const PEER_SERVER_PORT2: u16 = 43312;
+const PEER_SERVER_PORT3: u16 = 43313;
 
-// Stagger port value given num
-pub fn peer_port(id: u16) -> u16 {
-    match id % 4 {
-        0 => PEER_SERVER_PORT0,
-        1 => PEER_SERVER_PORT1,
-        2 => PEER_SERVER_PORT2,
-        3 => PEER_SERVER_PORT3,
-        _ => PEER_SERVER_PORT0,
+pub struct PeerServer;
+
+impl PeerServer {
+    /* Utility function(s) */
+
+    // Stagger port value given num
+    pub fn peer_port(id: u16) -> u16 {
+        match id % 4 {
+            0 => PEER_SERVER_PORT0,
+            1 => PEER_SERVER_PORT1,
+            2 => PEER_SERVER_PORT2,
+            3 => PEER_SERVER_PORT3,
+            _ => PEER_SERVER_PORT0,
+        }
+    }
+
+    pub fn stagger_address_port(mut addr: std::net::SocketAddr, id: u16) -> String {
+        // drop current port of addr
+        // (since this is used already)
+        // add a staggered port to addr
+        addr.set_port(PeerServer::peer_port(id));
+        format!("{}", &addr)
     }
 }

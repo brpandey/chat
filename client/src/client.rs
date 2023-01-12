@@ -1,10 +1,8 @@
-use std::sync::{Arc, /*Mutex*/};
 use tokio::select;
-use tokio::sync::Mutex;
 use tokio::io::{self, Error, ErrorKind}; //, AsyncWriteExt}; //, AsyncReadExt};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
-use tokio::task::{JoinSet, JoinHandle};
+use tokio::task::JoinHandle;
 
 //use tracing_subscriber::fmt;
 use tracing::{info, debug, /*error*/};
@@ -12,8 +10,8 @@ use tracing::{info, debug, /*error*/};
 use protocol::{ChatMsg, Request, Response};
 
 use crate::builder::ClientBuilder as Builder;
-use crate::peer_client::PeerClient;
-use crate::peer_server::{PeerServerListener, PEER_SERVER, peer_port};
+use crate::peer_set::PeerSet;
+use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n\n$ Please input chat name: ";
@@ -24,19 +22,15 @@ pub struct Client {
     id: u16,
     io_id: u16,
     name: String,
-    peer_clients: Option<Arc<Mutex<JoinSet<u8>>>>,
     builder: Builder,
 }
 
 impl Client {
     pub fn new(io_id: u16, builder: Builder) -> Self {
-        let peer_clients = Some(Arc::new(Mutex::new(JoinSet::new())));
-
         Client {
             id: 0,
             io_id,
             name: String::new(),
-            peer_clients,
             builder,
         }
     }
@@ -72,26 +66,26 @@ impl Client {
         Ok(())
     }
 
-    pub fn spawn(io_shared: InputShared) -> JoinHandle<()> {
+    pub fn spawn(io_shared: InputShared, peer_set: PeerSet) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Ok(mut c) = Client::build(&io_shared).await {
                 if c.register().await.is_ok() {
-                    c.run(io_shared).await.expect("client terminated with an error");
+                    c.run(io_shared, peer_set).await.expect("client terminated with an error");
                 }
             }
         })
     }
 
-    pub async fn run(&mut self, io_shared: InputShared) -> io::Result<()> {
+    pub async fn run(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> io::Result<()> {
         self.spawn_cmd_line_read(io_shared.clone());
-        self.spawn_read(io_shared.clone());
+        self.spawn_read(io_shared.clone(), peer_set.clone());
         self.spawn_write();
 
         // stagger the local peer server port value
-        let addr = format!("{}:{}", PEER_SERVER, peer_port(self.id));
+        let addr = format!("{}:{}", PEER_SERVER, PeerServer::peer_port(self.id));
 
         // start up peer server for clients that connect to this node for peer to peer chat.
-        PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared);
+        PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared, peer_set);
 
         let (_, mut shutdown_rx) = self.builder.shutdown_handles();
 
@@ -114,26 +108,14 @@ impl Client {
         }
 */
 
-        // consume arc and lock
-        let peer_clients = self.peer_clients.take().unwrap();
-       // thread 'tokio-runtime-worker' panicked at 'called `Result::unwrap()` on an `Err` value: Mutex { data: JoinSet { len: 1 } }', src/client.rs:143:57
-        let mut clients = Arc::try_unwrap(peer_clients).unwrap().into_inner();
-
-        info!("clients are {:?}", clients);
-
-        while let Some(res) = clients.join_next().await {
-            info!("peer client completed {:?}", res);
-        }
-
         info!("Thank you and good bye!");
 
         Ok(())
     }
 
-    pub fn spawn_read(&mut self, io_shared: InputShared) {
+    pub fn spawn_read(&mut self, io_shared: InputShared, mut peer_set: PeerSet) {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
-        let peer_set = Arc::clone(self.peer_clients.as_mut().unwrap());
 
         let mut fr = self.builder.take_read();
         let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
@@ -154,26 +136,14 @@ impl Client {
                             Ok(ChatMsg::Server(Response::Notification(line))) => {
                                 println!(">>> {}", std::str::from_utf8(&line).unwrap_or_default());
                             },
-                            Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, name, mut addr})) => {
+                            Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, name, addr})) => {
                                 let peer_name = String::from_utf8(name).unwrap_or_default();
                                 println!(">>> Forked private session with {} {}", pid, peer_name);
-
                                 println!(">>> To switch back to main lobby, type: \\s 0");
 
-                                // spawn tokio task to send client requests to peer server address
-                                // responding to server requests will take a lower priority
-                                // unless the user explicitly switches over to communicating with the server from
-                                // peer to peer mode
-
-                                // drop current port of addr
-                                // (since this is used already)
-                                // add a staggered port to addr
-                                addr.set_port(peer_port(pid));
-                                let addr_string = format!("{}", &addr);
-
-                                peer_set
-                                    .lock().await
-                                    .spawn(PeerClient::nospawn_a(addr_string, client_name.clone(), peer_name, io_shared.clone()));
+                                // Spawn tokio task to send client requests to peer server address
+                                let addr_str = PeerServer::stagger_address_port(addr, pid);
+                                peer_set.spawn_a(addr_str, client_name.clone(), peer_name, io_shared.clone()).await;
                             },
                             Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                                 println!(">>> Unable to fork into private session as peer {} unavailable",
