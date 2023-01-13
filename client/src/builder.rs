@@ -89,9 +89,9 @@ impl PeerClientBuilder {
     }
 
     // Register new io id and notify
-    pub async fn io_register_notify(mut self, io_shared: &InputShared, peer_name: &str) -> Self {
+    pub async fn io_register_notify(mut self, io_shared: &InputShared, peer_name: String) -> Self {
         self.io_id = io_shared.get_next_id().await;
-        io_shared.notify(InputMsg::NewSession(self.io_id, peer_name.to_owned())).await.expect("Unable to send input msg");
+        io_shared.notify(InputMsg::NewSession(self.io_id, peer_name)).await.expect("Unable to send input msg");
         self
     }
 
@@ -122,7 +122,6 @@ impl PeerClientBuilder {
     }
 }
 
-
 pub struct ClientBuilder {
     shutdown_tx: Option<BSender<u8>>,
     shutdown_rx: Option<BReceiver<u8>>,
@@ -135,12 +134,9 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     pub fn new() -> Self {
-        // create a not used channel for init purposes
-//        let (dummy_tx, dummy_rx) = broadcast::channel(1);
-
         Self {
-            shutdown_tx: None, //dummy_tx,
-            shutdown_rx: None, // dummy_rx,
+            shutdown_tx: None,
+            shutdown_rx: None,
             fr: None,
             fw: None,
             local_rx: None,

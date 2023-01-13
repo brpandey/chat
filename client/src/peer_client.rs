@@ -58,7 +58,7 @@ impl PeerClient {
         let client = Builder::new(name)
             .connect(&server).await?
             .channels()
-            .io_register_notify(io_shared, &peer_name).await
+            .io_register_notify(io_shared, peer_name).await
             .build();
 
         info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}",
