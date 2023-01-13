@@ -30,7 +30,6 @@ impl PeerClient {
     }
 
     pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> () {
-
         if let Ok(mut client) = PeerClient::build_a(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
@@ -42,12 +41,9 @@ impl PeerClient {
 
     pub async fn nospawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
                    name: String, io_shared: InputShared) -> () {
-
-//        let _h = tokio::spawn(async move {
         if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
             client.run(io_shared).await;
         }
-        //        });
 
         ()
     }
@@ -147,17 +143,14 @@ impl PeerClient {
             }
         });
 
-        info!("gonzo A");
         peer_server_read_handle.await.unwrap();
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
         io_notify2.send(InputMsg::CloseSession(io_id)).await.expect("Unable to send close sesion msg");
 
-        info!("gonzo B");
-
         cmd_line_handle.await.unwrap();
 
-        info!("gonzo C");
+        info!("Peer client exiting!");
     }
 
     pub fn parse_input(name: &str, line: String) -> Option<Ask> {

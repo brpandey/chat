@@ -12,7 +12,7 @@ use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::PeerSet;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::input_handler::{IO_ID_OFFSET, InputHandler, InputShared};
+use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler, InputShared};
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
@@ -77,59 +77,59 @@ impl Client {
     }
 
     pub async fn run(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> io::Result<()> {
-        self.spawn_cmd_line_read(io_shared.clone());
-        self.spawn_read(io_shared.clone(), peer_set.clone());
-        self.spawn_write();
+        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone());
+        let server_read_handle = self.spawn_read(io_shared.clone(), peer_set.clone());
+        let server_write_handle = self.spawn_write();
 
         // stagger the local peer server port value
         let addr = format!("{}:{}", PEER_SERVER, PeerServer::peer_port(self.id));
 
+        let (_, shutdown_rx1) = self.builder.shutdown_handles();
+        let (_, mut shutdown_rx2) = self.builder.shutdown_handles();
+
         // start up peer server for clients that connect to this node for peer to peer chat.
-        PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared, peer_set);
+        let local_server_handle =
+            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set, shutdown_rx1);
 
-        let (_, mut shutdown_rx) = self.builder.shutdown_handles();
-
-        select! {
-            _ = shutdown_rx.recv() => { // exit task if shutdown received
-                info!("received final shutdown");
-//                break;
-            }
-        };
-
-/*
-        select! {
-            _ = server_read_handle => { // fires as soon as future completes
-                //      tcp_write_handle.abort();
-                println!("X");
-            }
-            _ = cmd_line_handle => {
-                println!("Y");
-            }
+        // If client needs to shut down, close the lobby
+        // indicate that only existing peer client conversations are now only running if any
+        // should the user type \\sessions command
+        if let Ok(_) = shutdown_rx2.recv().await {
+            io_shared.notify(InputMsg::CloseLobby).await.expect("Unable to send close lobby");
         }
-*/
 
-        info!("Thank you and good bye!");
+        let futures = vec![
+            server_read_handle,
+            cmd_line_handle,
+            server_write_handle,
+            local_server_handle,
+        ];
+
+        futures::future::join_all(futures).await;
+
+        info!("Client terminating: either server was terminated or user terminated by ctrl c'ing or \\quit");
 
         Ok(())
     }
 
-    pub fn spawn_read(&mut self, io_shared: InputShared, mut peer_set: PeerSet) {
+    pub fn spawn_read(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> JoinHandle<()> {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
 
         let mut fr = self.builder.take_read();
         let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
 
-        let _server_read_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 debug!("task A: listening to server replies...");
 
                 select! {
                     // Read lines from server
-                    Some(value) = fr.next() => {
-                        debug!("received server value is {:?}", value);
+                    server_input = async {
+                        let server_msg = fr.next().await?;
+                        debug!("received server value is {:?}", server_msg);
 
-                        match value {
+                        match server_msg {
                             Ok(ChatMsg::Server(Response::UserMessage{id, msg})) => {
                                 println!("> {} {}", id, std::str::from_utf8(&msg).unwrap_or_default());
                             },
@@ -152,32 +152,32 @@ impl Client {
                             Ok(_) => unimplemented!(),
                             Err(x) => {
                                 debug!("Client Connection closing error: {:?}", x);
-                                break;
                             }
                         }
-                    } // exit task if shutdown received
+                        Some(())
+                    } => {
+                        if server_input.is_none() { // if input handler has received a terminate
+                            info!("!!Server Remote has closed, sending shutdown msg A");
+                            shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            return
+                        }
+                    }
+                    // exit task if shutdown received
                     _ = shutdown_rx.recv() => {
                         info!("server_read_handle received shutdown, returning!");
                         return;
                     }
-                    else => {
-                        info!("Server Remote has closed");
-                        info!("sending shutdown msg A");
-                        shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
-                        break;
-                    }
                 };
-                //        server_alive_ref1.swap(false, Ordering::Relaxed);
             }
-        });
+        })
     }
 
-    pub fn spawn_write(&mut self) {
+    pub fn spawn_write(&mut self) -> JoinHandle<()> {
         let (mut fw, mut local_rx) = self.builder.take_write_fields();
         let (_, mut shutdown_rx) = self.builder.shutdown_handles();
 
         // Spawn client tcp write tokio task, to send data to server
-        let _tcp_write_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 select! {
                     // Read from channel, data received from command line
@@ -190,10 +190,10 @@ impl Client {
                     }
                 }
             }
-        });
+        })
     }
 
-    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared) {
+    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared) -> JoinHandle<()> {
         // grab io related data
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
@@ -203,7 +203,7 @@ impl Client {
         let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
 
         // Use current thread to loop and grab data from command line
-        let _cmd_line_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 select! {
                     input = async {
@@ -228,7 +228,7 @@ impl Client {
                     }
                 }
             }
-        });
+        })
     }
 
     pub fn parse_input(line: String) -> Option<Request> {

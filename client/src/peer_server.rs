@@ -1,4 +1,6 @@
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
+use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio::sync::mpsc;
 
 use std::io::ErrorKind;
@@ -13,9 +15,10 @@ use tracing::info;
 pub struct PeerServerListener;
 
 impl PeerServerListener {
-    pub fn spawn_accept(addr: String, name: String, io_shared: InputShared, mut peer_set: PeerSet) {
-        let _h = tokio::spawn(async move {
+    pub fn spawn_accept(addr: String, name: String, io_shared: InputShared,
+                        mut peer_set: PeerSet, mut shutdown_rx: BReceiver<u8>) -> JoinHandle<()> {
 
+        tokio::spawn(async move {
             info!("Client peer server starting {:?}", &addr);
 
             let result = TcpListener::bind(addr).await;
@@ -24,31 +27,34 @@ impl PeerServerListener {
                 info!("Peer server address already in use, can not have more than 1 peer client on the same machine");
                 return;
             }
-
             let listen = result.expect("Unable to bind to server address");
 
             loop {
-                if let Ok((tcp_socket, addr)) = listen.accept().await {
-                    let (tcp_read, tcp_write) = tcp_socket.into_split();
+                tokio::select! {
+                    Ok((tcp_socket, addr)) = listen.accept() => {
+                        let (tcp_read, tcp_write) = tcp_socket.into_split();
 
-                    info!("Server received new client connection {:?}", &addr);
+                        info!("Server received new client connection {:?}", &addr);
 
-                    // create msg queues between peer client and peer server handler
-                    // so they can easily communicate with each other
-                    let (client_tx, client_rx) = mpsc::channel::<PeerMsgType>(64);
-                    let (server_tx, server_rx) = mpsc::channel::<PeerMsgType>(64);
+                        // create msg queues between peer client and peer server handler
+                        // so they can easily communicate with each other
+                        let (client_tx, client_rx) = mpsc::channel::<PeerMsgType>(64);
+                        let (server_tx, server_rx) = mpsc::channel::<PeerMsgType>(64);
 
-                    // For each new peer that wants to connect with this node e.g. N1
-                    // spawn a separate peer client of type B that locally communicates with peer server
-                    peer_set.spawn_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
+                        // For each new peer that wants to connect with this node e.g. N1
+                        // spawn a separate peer client of type B that locally communicates with peer server
+                        peer_set.spawn_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
 
-                    let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
-                    handler.spawn().await;
-                } else {
-                    break;
+                        let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
+                        handler.spawn().await;
+                    }
+                    _ = shutdown_rx.recv() => {
+                        info!("Peer server received shutdown, returning!");
+                        return;
+                    }
                 }
             }
-        });
+        })
     }
 }
 
@@ -62,8 +68,6 @@ const PEER_SERVER_PORT3: u16 = 43313;
 pub struct PeerServer;
 
 impl PeerServer {
-    /* Utility function(s) */
-
     // Stagger port value given num
     pub fn peer_port(id: u16) -> u16 {
         match id % 4 {

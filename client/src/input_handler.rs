@@ -1,7 +1,5 @@
-//use std::thread;
 use std::io as stdio;
 use std::io::{stdout, Write};
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
@@ -36,6 +34,7 @@ pub enum InputMsg {
     NewSession(u16, String),
     UpdatedSessionName(u16, String),
     CloseSession(u16),
+    CloseLobby,
 }
 
 pub struct InputHandler {
@@ -86,14 +85,9 @@ impl InputHandler {
             let mut quit = false;
             loop {
                 let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
-                //            let stdin = io::stdin();
 
                 select!(
                     Some(Ok(line)) = fr.next() => {
-
-                        // grab the stdin lines at the exclusive behest of anyone else
-                        //            for line in stdin.lock().lines().map(|l| l.unwrap()) {
-
                         // handles terminal input switching
                         match line.as_str() {
                             "\\sessions" => {
@@ -154,6 +148,9 @@ impl InputHandler {
                                 if shared.close_session(id).await {
                                     current_id = IO_ID_START;
                                 }
+                            },
+                            InputMsg::CloseLobby => {
+                                shared.close_lobby().await;
                             }
                         }
                     }
@@ -209,7 +206,6 @@ impl InputHandler {
 
         info!("checkpoint B.2 no new line received");
 
-//            return Ok(Some("wakawaka".to_string()))
         return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
     }
 }
@@ -229,7 +225,6 @@ pub struct InputShared {
 impl InputShared {
     pub fn new(seed_id: u16, rx: InputReceiver, tx: InputNotifier) -> Self {
         let current = RwLock::new((seed_id, String::from("empty")));
-        //        let ids = RwLock::new(HashSet::from([seed_id]));
         let sessions = RwLock::new(HashMap::from([(seed_id, String::from("main lobby"))]));
         let counter = AtomicU16::new(seed_id);
 
@@ -280,6 +275,10 @@ impl InputShared {
             self.remove_id(io_id).await
     }
 
+    async fn close_lobby(&self) -> bool {
+        self.remove_id(IO_ID_START).await
+    }
+
     // remove from RwLock
     async fn remove_id(&self, id: u16) -> bool {
         self.shared.sessions.write().await.remove(&id).is_some()
@@ -289,7 +288,6 @@ impl InputShared {
         self.shared.sessions.read().await.contains_key(id)
     }
 
-    /* Current id and line methods */
     async fn force_switch_id(&self, switch_id: u16) -> bool {
         let mut switched: bool = false;
 
@@ -354,7 +352,6 @@ impl InputShared {
                 println!("{}{}, broadcast chat in {}", prefix, *k - IO_ID_OFFSET, v);
             } else {
                 println!("{}{}, peer chat --> {}", prefix, *k - IO_ID_OFFSET, v);
-
             }
 
             prefix = " ";

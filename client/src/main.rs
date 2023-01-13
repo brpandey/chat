@@ -6,7 +6,7 @@ use client::peer_set::PeerSet;
 use client::input_handler::InputHandler;
 
 use tracing_subscriber::fmt;
-use tracing::{Level, /*info*/};
+use tracing::{Level, info};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -20,17 +20,30 @@ async fn main() -> io::Result<()> {
     let input = InputHandler::new();
     let mut pset = PeerSet::new();
 
-    let ch = Client::spawn(input.get_shared(), pset.clone());
+    let client_handle = Client::spawn(input.get_shared(), pset.clone());
 
     thread::sleep(Duration::from_millis(4000));
 
-    let ih = InputHandler::spawn(input);
+    let input_handle = InputHandler::spawn(input);
 
-    // try_join?
-    ch.await.unwrap();
-    ih.await.expect("Couldn't join successfully on input task");
+    // if client has finished, wait on peer clients
+    // if peer clients are finished, and peer set is empty kill input handler
+    client_handle.await.unwrap();
+
+    info!("client handle has finished, now waiting on peer set -- join all");
 
     pset.join_all().await.expect("Couldn't join successfully on peer clients set");
+
+    info!("Pset finished joining.  Checking if pset is empty now");
+
+    if pset.is_empty().await { // if no peer clients running, kill input handler and terminate
+        info!("pset is empty now so aborting input handle");
+        input_handle.abort();
+//    } else { // else wait for peer clients to finish
+//        ih.await.expect("Couldn't join successfully on input task");        
+    }
+
+    info!("Main shutting down");
 
     Ok(())
 }

@@ -19,18 +19,23 @@ impl PeerSet {
         Self { set: Some(Arc::new(Mutex::new(JoinSet::new()))) }
     }
 
+    pub async fn is_empty(&self) -> bool {
+        if self.set.is_some() {
+            self.set.as_ref().unwrap().lock().await.is_empty()
+        } else { // if set has already been taken and is none
+            true
+        }
+    }
+
     pub fn clone(&mut self) -> Self {
         PeerSet {
             set: Some(Arc::clone(&self.set.as_mut().unwrap()))
         }
     }
 
-    pub async fn join_all(&mut self) -> io::Result<()> {
+    pub async fn join_all(&mut self) -> io::Result<Option<()>> {
         // consume arc and lock
         let set = self.set.take().unwrap();
-        // thread 'tokio-runtime-worker' panicked at
-        //'called `Result::unwrap()` on an `Err` value: Mutex { data: JoinSet { len: 1 } }', src/client.rs:143:57
-
         let try_arc = Arc::try_unwrap(set); // remove Arc layer
 
         let mut peer_clients = if try_arc.is_ok() {
@@ -46,7 +51,7 @@ impl PeerSet {
             info!("peer client completed {:?}", res);
         }
 
-        Ok(())
+        Ok(None) // no more peer clients left and arc has been consumed
     }
 
     pub async fn spawn_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
