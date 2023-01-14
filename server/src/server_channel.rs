@@ -54,8 +54,8 @@ impl ChannelReceiver {
                             local_tx.send(MsgType::MessageSingle(cid, users_msg)).await
                                 .expect("Unable to tx");
                         },
-                        MsgType::ForkPeerAck(cid, pid, name, addr) => {
-                            response = Response::ForkPeerAckB{pid, name, addr};
+                        MsgType::ForkPeerAck(cid, pid, pname, addr) => {
+                            response = Response::ForkPeerAckB{pid, pname, addr};
                             outgoing.send(cid, response).await;
                         },
                         MsgType::PeerUnavailable(cid, name) => {

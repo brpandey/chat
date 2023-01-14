@@ -170,14 +170,14 @@ impl RequestHandler {
                                 .expect("Unable to tx");
                         }
                     },
-                    Ok(ChatMsg::Client(Request::ForkPeer{name})) => {
+                    Ok(ChatMsg::Client(Request::ForkPeer{pname})) => {
                         // retrieve client id and addr from names if still active
-                        let name_key = std::str::from_utf8(&name).unwrap_or_default();
-                        if let Some((peer_id, sock_str)) = self.chat_names.read().await.get(&name_key) {
-                            let msg = MsgType::ForkPeerAck(self.client_id, *peer_id, name, sock_str.to_owned());
+                        let pname_key = std::str::from_utf8(&pname).unwrap_or_default();
+                        if let Some((peer_id, sock_str)) = self.chat_names.read().await.get(&pname_key) {
+                            let msg = MsgType::ForkPeerAck(self.client_id, *peer_id, pname, sock_str.to_owned());
                             self.task_tx.send(msg).await.expect("Unable to tx");
                         } else {
-                            self.task_tx.send(MsgType::PeerUnavailable(self.client_id, name)).await.expect("Unable to tx");
+                            self.task_tx.send(MsgType::PeerUnavailable(self.client_id, pname)).await.expect("Unable to tx");
                         }
                     },
                     Ok(_) => unimplemented!(),

@@ -136,8 +136,8 @@ impl Client {
                             Ok(ChatMsg::Server(Response::Notification(line))) => {
                                 println!(">>> {}", std::str::from_utf8(&line).unwrap_or_default());
                             },
-                            Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, name, addr})) => {
-                                let peer_name = String::from_utf8(name).unwrap_or_default();
+                            Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, pname, addr})) => {
+                                let peer_name = String::from_utf8(pname).unwrap_or_default();
                                 println!(">>> Forked private session with {} {}", pid, peer_name);
                                 println!(">>> To switch back to main lobby, type: \\s 0");
 
@@ -194,6 +194,9 @@ impl Client {
     }
 
     pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared) -> JoinHandle<()> {
+        // get self field
+        let name = self.name.clone();
+
         // grab io related data
         let io_id = self.io_id;
         let mut input_rx = io_shared.get_receiver();
@@ -208,7 +211,7 @@ impl Client {
                 select! {
                     input = async {
                         let req = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared).await?
-                            .and_then(Client::parse_input);
+                            .and_then(|m| Client::parse_input(&name, m));
 
                         if req.is_some() {
                             local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
@@ -231,7 +234,7 @@ impl Client {
         })
     }
 
-    pub fn parse_input(line: String) -> Option<Request> {
+    pub fn parse_input(name: &str, line: String) -> Option<Request> {
         match line.as_str() {
             "\\quit" => {
                 info!("Session terminated by user...");
@@ -241,10 +244,16 @@ impl Client {
                 return Some(Request::Users)
             },
             value if value.starts_with("\\fork") => {
-                if let Some(name) = value.splitn(3, ' ').skip(1).take(1).next() {
-                    let name: Vec<u8> = name.as_bytes().to_owned();
-                    info!("Attempting to fork a session with {}", std::str::from_utf8(&name).unwrap_or_default());
-                    return Some(Request::ForkPeer{name})
+                if let Some(pname_str) = value.splitn(3, ' ').skip(1).take(1).next() {
+                    let pname: Vec<u8> = pname_str.as_bytes().to_owned();
+                    if name.as_bytes() == pname {
+                        info!("Only able to fork a session with other peers, not current peer!");
+                        return None
+                    } else {
+                        info!("Attempting to fork a session with {}", std::str::from_utf8(&pname).unwrap_or_default());
+                        return Some(Request::ForkPeer{pname})
+
+                    }
                 } else {
                     return None
                 }

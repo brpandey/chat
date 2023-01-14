@@ -51,7 +51,7 @@ pub enum Request { // b'+'
     JoinName(Vec<u8>), // b'&'
     ForkPeer{ // b'%'
 //        id: u16,
-        name: Vec<u8>,
+        pname: Vec<u8>,
     },
     Heartbeat, // b'!'
 }
@@ -71,12 +71,12 @@ pub enum Response { // b'-'
     ),
     ForkPeerAckA { // b'^'   same type this used for decode
         pid: u16, // peer id
-        name: Vec<u8>,
+        pname: Vec<u8>,
         addr: SocketAddr,
     },
     ForkPeerAckB { // b'^'   same type this used for encode
         pid: u16, // peer id
-        name: Vec<u8>,
+        pname: Vec<u8>,
         addr: Vec<u8>,
     },
     PeerUnavailable(Vec<u8>), // b'~'
@@ -128,9 +128,8 @@ impl Decoder for ChatCodec {
                         return Ok(Some(ChatMsg::Client(Request::JoinName(msg))))
                     },
                     REQ_FORKP => {
-//                        id = src.get_u16();
                         msg = decode_vec(src)?;
-                        return Ok(Some(ChatMsg::Client(Request::ForkPeer{name: msg})))
+                        return Ok(Some(ChatMsg::Client(Request::ForkPeer{pname: msg})))
                     },
                     _ => unimplemented!()
                 }
@@ -154,9 +153,9 @@ impl Decoder for ChatCodec {
                     },
                     RESP_FORKACK => {
                         pid = src.get_u16();
-                        let name = decode_vec(src)?;
+                        let pname = decode_vec(src)?;
                         let addr = decode_addr(src)?;
-                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{pid, name, addr})))
+                        return Ok(Some(ChatMsg::Server(Response::ForkPeerAckA{pid, pname, addr})))
                     },
                     RESP_PEERUNAV => {
                         let name = decode_vec(src)?;
@@ -230,10 +229,10 @@ impl Encoder<Request> for ChatCodec {
                 dst.put_u8(REQ_NAME);
                 encode_vec(msg, dst);
             },
-            Request::ForkPeer{name} => {
+            Request::ForkPeer{pname} => {
                 dst.put_u8(REQ);
                 dst.put_u8(REQ_FORKP);
-                encode_vec(name, dst);
+                encode_vec(pname, dst);
             },
             _ => unimplemented!()
         }
@@ -264,13 +263,12 @@ impl Encoder<Response> for ChatCodec {
                 dst.put_u8(RESP_NOTIF);
                 encode_vec(msg, dst);
             },
-            Response::ForkPeerAckB{pid, name, addr} => {
+            Response::ForkPeerAckB{pid, pname, addr} => {
                 dst.put_u8(RESP);
                 dst.put_u8(RESP_FORKACK);
                 dst.put_u16(pid);
-                encode_vec(name, dst);
+                encode_vec(pname, dst);
                 encode_vec(addr, dst); // upon encode socket addr is Vec<u8
-//                encode_addr(addr, dst);
             },
             Response::PeerUnavailable(name) => {
                 dst.put_u8(RESP);
