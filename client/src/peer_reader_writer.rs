@@ -140,7 +140,7 @@ impl PeerReader {
                         io_notify.send(InputMsg::UpdatedSessionName(io_id, name))
                             .await.expect("Unable to send close sesion msg");
 
-                        println!("< {}, to chat, type: \\s {} (peer type B), to return to lobby, type: \\s 0 >",
+                        println!("< {}, to chat, type: \\sw {} (peer type B), to return to lobby, type: \\sw 0 >",
                                  std::str::from_utf8(&msg).unwrap_or_default(), io_id - IO_ID_OFFSET);
                     },
                     PeerMsgType::Note(msg) => {

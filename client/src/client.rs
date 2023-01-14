@@ -14,7 +14,7 @@ use crate::peer_set::PeerSet;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler, InputShared};
 
-const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n\n$ Please input chat name: ";
+const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
 const SHUTDOWN: u8 = 1;
 
@@ -139,7 +139,7 @@ impl Client {
                             Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, pname, addr})) => {
                                 let peer_name = String::from_utf8(pname).unwrap_or_default();
                                 println!(">>> Forked private session with {} {}", pid, peer_name);
-                                println!(">>> To switch back to main lobby, type: \\s 0");
+                                println!(">>> To switch back to main lobby, type: \\sw 0");
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);

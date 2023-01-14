@@ -90,12 +90,12 @@ impl InputHandler {
                     Some(Ok(line)) = fr.next() => {
                         // handles terminal input switching
                         match line.as_str() {
-                            "\\sessions" => {
+                            "\\sessions" | "\\ss" => {
                                 info!("Sessions request...");
                                 shared.display_sessions(current_id).await;
                                 continue;  // don't forward the sessions msg on
                             },
-                            value if value.starts_with("\\switch") || value.starts_with("\\s") => {
+                            value if value.starts_with("\\switch") || value.starts_with("\\sw") => {
                                 if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
                                     let switch_id_str = id_str.to_owned(); // &str to String
                                     let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
@@ -306,7 +306,7 @@ impl InputShared {
             if switch_id == IO_ID_START {
                 println!(">>> Auto switched back to main lobby {}", switch_id - IO_ID_OFFSET);
             } else {
-                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\s 0", switch_id - IO_ID_OFFSET);
+                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\sw 0", switch_id - IO_ID_OFFSET);
             }
         }
 
