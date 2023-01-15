@@ -24,7 +24,7 @@ async fn main() -> io::Result<()> {
 
     thread::sleep(Duration::from_millis(4000));
 
-    let input_handle = InputHandler::spawn(input);
+    let (input_thread_handle, input_task_handle) = InputHandler::spawn(input);
 
     // if client has finished, wait on peer clients
     // if peer clients are finished, and peer set is empty kill input handler
@@ -38,7 +38,8 @@ async fn main() -> io::Result<()> {
 
     if pset.is_empty().await { // if no peer clients running, kill input handler and terminate
         info!("pset is empty now so aborting input handle");
-        input_handle.abort();
+        input_task_handle.abort();
+        drop(input_thread_handle);
 //    } else { // else wait for peer clients to finish
 //        ih.await.expect("Couldn't join successfully on input task");        
     }

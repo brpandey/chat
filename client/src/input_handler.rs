@@ -1,5 +1,8 @@
+use std::thread;
 use std::io as stdio;
 use std::io::{stdout, Write};
+use std::io::BufRead;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
@@ -12,8 +15,6 @@ use tokio::sync::mpsc::Sender as MSender;
 use tokio::sync::mpsc::Receiver as MReceiver;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::watch::{self, Sender, Receiver};
-use tokio_util::codec::{FramedRead, LinesCodec};
-use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 
 use tracing::info;
 
@@ -23,7 +24,6 @@ type InputSender = Sender<(u16, u16)>;
 
 pub const IO_ID_OFFSET: u16 = 1000;
 const IO_ID_START: u16 = 1000;
-const LINES_MAX_LEN: usize = 256;
 const USER_LINES: usize = 64;
 
 pub type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
@@ -37,22 +37,30 @@ pub enum InputMsg {
     CloseLobby,
 }
 
+#[derive(Debug)]
+pub enum InputCmd {
+    Quit,
+    Switch(u16),
+    Sessions,
+    Other(String)
+}
+
 pub struct InputHandler {
     shared: InputShared,
-    tx: Option<InputSender>,
-    rx: Option<MReceiver<InputMsg>>,
+    watch_tx: Option<InputSender>,
+    msg_rx: Option<MReceiver<InputMsg>>,
 }
 
 impl InputHandler {
     pub fn new() -> Self {
-        let (msg_tx, msg_rx) = mpsc::channel::<InputMsg>(32);
+        let (msg_tx, msg_rx) = mpsc::channel::<InputMsg>(16);
         let (watch_tx, watch_rx) = watch::channel((0, 0)); // Watch channel has 1 tx and potentially multiple receivers
         let shared = InputShared::new(IO_ID_START, watch_rx, msg_tx);
 
         Self {
             shared,
-            tx: Some(watch_tx),
-            rx: Some(msg_rx),
+            watch_tx: Some(watch_tx),
+            msg_rx: Some(msg_rx),
         }
     }
 
@@ -62,7 +70,6 @@ impl InputHandler {
 
     pub fn interleave_newlines(line: &str, mut acc: Vec<Vec<u8>>) -> Vec<u8> {
         let mut v: Vec<u8>;
-
         let mut citer = line.as_bytes().chunks(USER_LINES);
 
         while let Some(chunk) = citer.next() {
@@ -74,67 +81,111 @@ impl InputHandler {
         acc.into_iter().flatten().collect::<Vec<u8>>()
     }
 
-    pub fn spawn(mut input: InputHandler) -> tokio::task::JoinHandle<()> {
+    fn handle_input(line: String, cmd_tx: &MSender<InputCmd>) -> bool {
+        let mut quit = false;
+
+        info!("Received a new line: {:?}", &line);
+
+        // handles terminal input switching
+        match line.as_str() {
+            "\\sessions" | "\\ss" => {
+                info!("Sessions request...");
+                cmd_tx.blocking_send(InputCmd::Sessions).unwrap();
+            },
+            value if value.starts_with("\\switch") || value.starts_with("\\sw") => {
+                if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
+                    let switch_id_str = id_str.to_owned(); // &str to String
+                    let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
+                    info!("Attempting to switch input to {}", &switch_id);
+                    cmd_tx.blocking_send(InputCmd::Switch(switch_id)).unwrap();
+                }
+            },
+            "\\quit" => {
+                info!("Input handler received quit.. aborting but passing on first");
+                quit = true;
+                cmd_tx.blocking_send(InputCmd::Quit).unwrap();
+            },
+            _ => {
+                cmd_tx.blocking_send(InputCmd::Other(line)).unwrap();
+            }
+        }
+
+        quit
+    }
+
+    // spawn thread and tokio task
+    pub fn spawn(mut input: InputHandler) -> (std::thread::JoinHandle<()>, tokio::task::JoinHandle<()>) {
         let shared = input.shared.clone();
-        let watch_tx = input.tx.take().unwrap();
-        let mut msg_rx = input.rx.take().unwrap();
+        let watch_tx = input.watch_tx.take().unwrap();
+        let mut msg_rx = input.msg_rx.take().unwrap();
+
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<InputCmd>(1);
+
         let mut current_id = IO_ID_START;
         let mut seq_no = 0;
 
-        tokio::spawn(async move {
-            let mut quit = false;
-            loop {
-                let mut fr = FramedRead::new(tokio::io::stdin(), LinesCodec::new_with_max_length(LINES_MAX_LEN));
+        // single thread dedicated to std input reads
+        // it communicates with the tokio task via cmd_tx
+        let thread_handle = thread::spawn(move || {
+            let stdin = stdio::stdin();
+            let lines = stdin.lock().lines();
 
+            for line in lines.map(|l| l.unwrap()) {
+                if Self::handle_input(line, &cmd_tx) {
+                    info!("Received quit terminating input thread");
+                    return
+                }
+            }
+
+        });
+
+        // spawn tokio task for input cmd receives and input msg receives
+        let task_handle = tokio::spawn(async move {
+            let mut quit = false;
+
+            loop {
                 select!(
-                    Some(Ok(line)) = fr.next() => {
-                        // handles terminal input switching
-                        match line.as_str() {
-                            "\\sessions" | "\\ss" => {
-                                info!("Sessions request...");
+                    Some(cmd) = cmd_rx.recv(), if !quit => {
+                        info!("Received a new line: {:?}", &cmd);
+
+                        match cmd {
+                            InputCmd::Sessions => {
+                                info!("!! Sessions request...");
                                 shared.display_sessions(current_id).await;
                                 continue;  // don't forward the sessions msg on
                             },
-                            value if value.starts_with("\\switch") || value.starts_with("\\sw") => {
-                                if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
-                                    let switch_id_str = id_str.to_owned(); // &str to String
-                                    let switch_id = switch_id_str.parse::<u16>().unwrap_or_default() + IO_ID_OFFSET; // String to u16
-                                    info!("Attempting to switch input to {}", &switch_id);
-
+                            InputCmd::Switch(switch_id) => {
                                     // Local validation for valid id
-                                    if shared.contains_id(&switch_id).await {
-                                        info!("Successful id and line switch, old id {} new id {}", current_id, switch_id);
-                                        // swap out old current id and line and replace with new
-                                        current_id = switch_id;
-                                        shared.switch_id_and_line(switch_id, &line).await;
-                                    } else { // if switch_id not valid ignore and continue
-                                        info!("not a valid switch id");
-                                    }
+                                if shared.contains_id(&switch_id).await {
+                                    info!("!! Successful id and line switch, old id {} new id {}", current_id, switch_id);
+                                    // swap out old current id and line and replace with new
+                                    current_id = switch_id;
+                                    shared.switch_id(switch_id).await;
+                                } else { // if switch_id not valid ignore and continue
+                                    info!("!! not a valid switch id");
                                 }
-                                continue; // don't forward the switch msg on if it was successful
+                                continue; // don't forward switch message
                             },
-                            "\\quit" => {
-                                info!("Input handler received quit.. aborting but passing on first");
+                            InputCmd::Quit => {
+                                info!("!! Input handler received quit.. aborting but passing on first");
                                 quit = true;
+                                shared.switch_line("\\quit".to_owned()).await;
                             },
-                            _ => {
-                                shared.switch_line(&line).await; // replace old line with new line
-                            }
+                            InputCmd::Other(ref line) => {
+                                shared.switch_line(line.clone()).await; // replace old line with new line
+                            },
                         }
 
                         seq_no += 1;
 
-                        info!("Sending new change seq_no {}, current_id {} corresponding to line {}", seq_no, current_id, &line);
+                        info!("Sending new change seq_no {}, current_id {} corresponding to cmd {:?}", seq_no, current_id, &cmd);
 
                         // notify that a new line has been received (changing seq no) along with the current id
                         watch_tx.send((seq_no, current_id)).expect("Unable to send value on watch channel");
-
-                        if quit {
-                            drop(watch_tx);
-                            return
-                        }
                     }
                     Some(msg) = msg_rx.recv() => {
+                        info!("Received a new input msg: {:?}", &msg);
+
                         match msg {
                             InputMsg::NewSession(id, name) => {
                                 if shared.new_session(id, name).await {
@@ -153,10 +204,16 @@ impl InputHandler {
                                 shared.close_lobby().await;
                             }
                         }
+
+                        if quit {
+                            return
+                        }
                     }
                 )
             }
-        })
+        });
+
+        (thread_handle, task_handle)
     }
 
     // blocking function to gather user input from std::io::stdin
@@ -293,8 +350,7 @@ impl InputShared {
 
         if self.contains_id(&switch_id).await {
             // set lock inner value to id
-            let mut inner  = self.shared.current.write().await;
-            inner.0 = switch_id;
+            self.switch_id(switch_id).await;
             switched = true;
         }
 
@@ -313,17 +369,17 @@ impl InputShared {
         switched
     }
 
-    /* Current id and line methods */
-    async fn switch_line(&self, line: &str) {
-        // set lock inner value to new line
+    async fn switch_id(&self, switch_id: u16) {
+        // set lock inner value to id
         let mut inner  = self.shared.current.write().await;
-        *inner = (inner.0, line.to_owned());
+        inner.0 = switch_id;
     }
 
-    async fn switch_id_and_line(&self, switch_id: u16, line: &str) {
-        // set lock inner value to new io id along with new line
-        let mut inner = self.shared.current.write().await;
-        *inner = (switch_id, line.to_owned());
+    /* Current id and line methods */
+    async fn switch_line(&self, line: String) {
+        // set lock inner value to new line
+        let mut inner  = self.shared.current.write().await;
+        *inner = (inner.0, line);
     }
 
     async fn get_line_if_id_matches(&self, match_id: u16) -> Option<String> {
