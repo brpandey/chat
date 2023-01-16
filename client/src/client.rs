@@ -12,7 +12,8 @@ use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::PeerSet;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler, InputShared};
+use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler};
+use crate::input_shared::InputShared;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";

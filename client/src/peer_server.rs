@@ -8,7 +8,7 @@ use std::io::ErrorKind;
 use crate::peer_set::PeerSet;
 use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::peer_types::PeerMsgType;
-use crate::input_handler::InputShared;
+use crate::input_shared::InputShared;
 
 use tracing::info;
 

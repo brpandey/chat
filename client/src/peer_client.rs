@@ -5,7 +5,8 @@ use tokio::sync::mpsc::{Sender, Receiver};
 use protocol::Ask;
 use crate::builder::PeerClientBuilder as Builder;
 use crate::peer_types::PeerMsgType;
-use crate::input_handler::{InputMsg, InputHandler, InputShared};
+use crate::input_handler::{InputMsg, InputHandler};
+use crate::input_shared::InputShared;
 
 use tracing::{info, /*debug, error */};
 

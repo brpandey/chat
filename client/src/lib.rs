@@ -7,3 +7,4 @@ pub mod peer_reader_writer;
 pub mod peer_server;
 pub mod peer_server_request_handler;
 pub mod input_handler;
+pub mod input_shared;

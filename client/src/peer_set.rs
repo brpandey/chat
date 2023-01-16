@@ -5,7 +5,7 @@ use tokio::task::JoinSet;
 use tokio::sync::mpsc::{Sender, Receiver};
 
 use crate::peer_types::PeerMsgType;
-use crate::input_handler::InputShared;
+use crate::input_shared::InputShared;
 use crate::peer_client::PeerClient;
 
 use tracing::{info, /*error*/};
