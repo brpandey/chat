@@ -1,4 +1,4 @@
-use std::thread;
+use std::{thread, time};
 use std::io as stdio;
 use std::io::{stdout, Write};
 use std::io::BufRead;
@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
 
 use tokio::io::{self, Error, ErrorKind};
+use tokio::time::{sleep, Duration};
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
@@ -23,8 +24,9 @@ pub type InputReceiver = Receiver<(u16, u16)>;
 type InputSender = Sender<(u16, u16)>;
 
 pub const IO_ID_OFFSET: u16 = 1000;
-const IO_ID_START: u16 = 1000;
+const IO_ID_LOBBY: u16 = 1000;
 const USER_LINES: usize = 64;
+const QUIT_STR: &str = "\\quit";
 
 pub type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
 pub type Sessions = RwLock<HashMap<u16, String>>;
@@ -55,7 +57,7 @@ impl InputHandler {
     pub fn new() -> Self {
         let (msg_tx, msg_rx) = mpsc::channel::<InputMsg>(16);
         let (watch_tx, watch_rx) = watch::channel((0, 0)); // Watch channel has 1 tx and potentially multiple receivers
-        let shared = InputShared::new(IO_ID_START, watch_rx, msg_tx);
+        let shared = InputShared::new(IO_ID_LOBBY, watch_rx, msg_tx);
 
         Self {
             shared,
@@ -121,7 +123,7 @@ impl InputHandler {
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<InputCmd>(1);
 
-        let mut current_id = IO_ID_START;
+        let mut current_id = IO_ID_LOBBY;
         let mut seq_no = 0;
 
         // single thread dedicated to std input reads
@@ -132,11 +134,11 @@ impl InputHandler {
 
             for line in lines.map(|l| l.unwrap()) {
                 if Self::handle_input(line, &cmd_tx) {
-                    info!("Received quit terminating input thread");
-                    return
+                    info!("Received quit, terminating input thread");
+                    thread::sleep(time::Duration::from_millis(500));
+                    break;
                 }
             }
-
         });
 
         // spawn tokio task for input cmd receives and input msg receives
@@ -146,7 +148,7 @@ impl InputHandler {
             loop {
                 select!(
                     Some(cmd) = cmd_rx.recv(), if !quit => {
-                        info!("Received a new line: {:?}", &cmd);
+                        info!("Received a new cmd: {:?}", &cmd);
 
                         match cmd {
                             InputCmd::Sessions => {
@@ -155,33 +157,37 @@ impl InputHandler {
                                 continue;  // don't forward the sessions msg on
                             },
                             InputCmd::Switch(switch_id) => {
-                                    // Local validation for valid id
-                                if shared.contains_id(&switch_id).await {
+                                if shared.switch_id(switch_id).await {
                                     info!("!! Successful id and line switch, old id {} new id {}", current_id, switch_id);
                                     // swap out old current id and line and replace with new
                                     current_id = switch_id;
-                                    shared.switch_id(switch_id).await;
                                 } else { // if switch_id not valid ignore and continue
                                     info!("!! not a valid switch id");
                                 }
                                 continue; // don't forward switch message
                             },
                             InputCmd::Quit => {
-                                info!("!! Input handler received quit.. aborting but passing on first");
+                                info!("!! 1 Input handler received quit.. aborting but passing on first");
+                                shared.switch_line(QUIT_STR.to_owned()).await;
+                                Self::watch_send(&mut seq_no, current_id, &cmd, &watch_tx).await;
+
+                                // if peer client session is active,
+                                // send quit message also to main lobby session (if available)
+                                // hence switch over to lobby session and fire same message, if not, no issue
+                                if current_id != IO_ID_LOBBY {
+                                    sleep(Duration::from_millis(100)).await; // wait a little for prev msg to settle
+                                    if shared.switch_id_line(IO_ID_LOBBY, QUIT_STR.to_owned()).await {
+                                        current_id = IO_ID_LOBBY;
+                                    }
+                                }
                                 quit = true;
-                                shared.switch_line("\\quit".to_owned()).await;
                             },
                             InputCmd::Other(ref line) => {
                                 shared.switch_line(line.clone()).await; // replace old line with new line
                             },
                         }
 
-                        seq_no += 1;
-
-                        info!("Sending new change seq_no {}, current_id {} corresponding to cmd {:?}", seq_no, current_id, &cmd);
-
-                        // notify that a new line has been received (changing seq no) along with the current id
-                        watch_tx.send((seq_no, current_id)).expect("Unable to send value on watch channel");
+                        Self::watch_send(&mut seq_no, current_id, &cmd, &watch_tx).await;
                     }
                     Some(msg) = msg_rx.recv() => {
                         info!("Received a new input msg: {:?}", &msg);
@@ -197,16 +203,25 @@ impl InputHandler {
                             },
                             InputMsg::CloseSession(id) => {
                                 if shared.close_session(id).await {
-                                    current_id = IO_ID_START;
+                                    current_id = IO_ID_LOBBY;
+
+                                    // Quit only if true and after close session
+                                    // (allow other side to finish)
+                                    if quit {
+                                        info!("A Terminating tokio input handler task");
+                                        break;
+                                    }
                                 }
                             },
                             InputMsg::CloseLobby => {
                                 shared.close_lobby().await;
+                                // Quit only if true and after close lobby
+                                // (allow other side to finish)
+                                if quit {
+                                    info!("B Terminating tokio input handler task");
+                                    break;
+                                }
                             }
-                        }
-
-                        if quit {
-                            return
                         }
                     }
                 )
@@ -265,6 +280,13 @@ impl InputHandler {
 
         return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
     }
+
+    async fn watch_send(uid: &mut u16, sid: u16, cmd: &InputCmd, tx: &InputSender) {
+        *uid += 1;
+        info!("Sending new change uid {}, session_id {} corresponding to cmd {:?}", uid, sid, cmd);
+        // notify that a new line has been received (changing seq no) along with the current id
+        tx.send((*uid, sid)).expect("Unable to send value on watch channel");
+    }
 }
 
 pub struct InputBase {
@@ -312,14 +334,14 @@ impl InputShared {
 
     pub(crate) async fn get_next_id(&self) -> u16 {
         let new_id = self.shared.counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
-        if new_id != IO_ID_START {
+        if new_id != IO_ID_LOBBY {
             self.shared.sessions.write().await.insert(new_id, String::new());     // add to RwLock
         }
         new_id
     }
 
     async fn new_session(&self, io_id: u16, name: String) -> bool {
-        self.force_switch_id(io_id).await &&
+        self.display_and_switch_id(io_id).await &&
             self.shared.sessions.write().await.insert(io_id, name).is_some()
     }
 
@@ -328,12 +350,12 @@ impl InputShared {
     }
 
     async fn close_session(&self, io_id: u16) -> bool {
-        self.force_switch_id(IO_ID_START).await &&
+        self.display_and_switch_id(IO_ID_LOBBY).await &&
             self.remove_id(io_id).await
     }
 
     async fn close_lobby(&self) -> bool {
-        self.remove_id(IO_ID_START).await
+        self.remove_id(IO_ID_LOBBY).await
     }
 
     // remove from RwLock
@@ -345,21 +367,15 @@ impl InputShared {
         self.shared.sessions.read().await.contains_key(id)
     }
 
-    async fn force_switch_id(&self, switch_id: u16) -> bool {
-        let mut switched: bool = false;
-
-        if self.contains_id(&switch_id).await {
-            // set lock inner value to id
-            self.switch_id(switch_id).await;
-            switched = true;
-        }
-
+    async fn display_and_switch_id(&self, switch_id: u16) -> bool {
+        let switched = self.switch_id(switch_id).await; // set lock inner value to id
         {
             let inner = self.shared.current.read().await;
             println!("sanity check did we update shared current id? {} {}", inner.0, switch_id);
         }
+
         if switched {
-            if switch_id == IO_ID_START {
+            if switch_id == IO_ID_LOBBY {
                 println!(">>> Auto switched back to main lobby {}", switch_id - IO_ID_OFFSET);
             } else {
                 println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\sw 0", switch_id - IO_ID_OFFSET);
@@ -369,10 +385,30 @@ impl InputShared {
         switched
     }
 
-    async fn switch_id(&self, switch_id: u16) {
-        // set lock inner value to id
-        let mut inner  = self.shared.current.write().await;
-        inner.0 = switch_id;
+    async fn switch_id(&self, switch_id: u16) -> bool {
+        let mut switched: bool = false;
+
+        if self.contains_id(&switch_id).await {
+            // set lock inner value to id
+            let mut inner  = self.shared.current.write().await;
+            inner.0 = switch_id;
+            switched = true;
+        }
+
+        switched
+    }
+
+    async fn switch_id_line(&self, switch_id: u16, line: String) -> bool {
+        let mut switched = false;
+
+        if self.contains_id(&switch_id).await {
+            // set lock inner value to id and line
+            let mut inner  = self.shared.current.write().await;
+            *inner = (switch_id, line);
+            switched = true;
+        }
+
+        switched
     }
 
     /* Current id and line methods */
@@ -393,9 +429,8 @@ impl InputShared {
     }
 
     async fn display_sessions(&self, current_id: u16) {
-        //let map_iter = self.shared.sessions.read().await.iter();
         let mut prefix: &str = " ";
-        println!("<Active Sessions>");
+        println!("< Active Sessions (type \\sw (session id) to switch over) >");
 
         for (k, v) in self.shared.sessions.read().await.iter() {
 
@@ -404,7 +439,7 @@ impl InputShared {
                 prefix = "*";
             }
 
-            if *k == IO_ID_START {
+            if *k == IO_ID_LOBBY {
                 println!("{}{}, broadcast chat in {}", prefix, *k - IO_ID_OFFSET, v);
             } else {
                 println!("{}{}, peer chat --> {}", prefix, *k - IO_ID_OFFSET, v);
