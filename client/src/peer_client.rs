@@ -8,7 +8,7 @@ use crate::peer_types::PeerMsgType;
 use crate::input_handler::{InputMsg, InputHandler};
 use crate::input_shared::InputShared;
 
-use tracing::{info, /*debug, error */};
+use tracing::{info, /*debug, */error};
 
 const SHUTDOWN: u8 = 1;
 
@@ -48,6 +48,7 @@ impl PeerClient {
 
         ()
     }
+
 
     // client is peer type A which initiates a reaquest to an already running peer B
     // client type A is not connected to the peer B server other than through tcp
@@ -147,7 +148,9 @@ impl PeerClient {
         peer_server_read_handle.await.unwrap();
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
-        io_notify2.send(InputMsg::CloseSession(io_id)).await.expect("Unable to send close sesion msg");
+        if io_notify2.send(InputMsg::CloseSession(io_id)).await.is_err() {
+            error!("Unable to send close sesion msg");
+        }
 
         cmd_line_handle.await.unwrap();
 

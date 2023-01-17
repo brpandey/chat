@@ -202,24 +202,17 @@ impl InputHandler {
                             InputMsg::CloseSession(id) => {
                                 if shared.close_session(id).await {
                                     current_id = IO_ID_LOBBY;
-
-                                    // Quit only if true and after close session
-                                    // (allow other side to finish)
-                                    if quit {
-                                        info!("A Terminating tokio input handler task");
-                                        break;
-                                    }
                                 }
                             },
                             InputMsg::CloseLobby => {
                                 shared.close_lobby().await;
-                                // Quit only if true and after close lobby
-                                // (allow other side to finish)
-                                if quit {
-                                    info!("B Terminating tokio input handler task");
-                                    break;
-                                }
                             }
+                        }
+
+                        // Quit not waiting for the other side to finish
+                        if quit {
+                            info!("X Terminating tokio input handler task");
+                            break;
                         }
                     }
                 )

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender as MSender;
-use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::watch::Receiver;
 //use tracing::info;
 
@@ -49,8 +49,8 @@ impl InputShared {
         }
     }
 
-    pub(crate) async fn notify(&self, msg: InputMsg) -> Result<(), SendError<InputMsg>> {
-        self.shared.tx.send(msg).await
+    pub(crate) async fn notify(&self, msg: InputMsg) -> Result<(), TrySendError<InputMsg>> {
+        self.shared.tx.try_send(msg)
     }
 
     pub(crate) fn get_notifier(&self) -> InputNotifier {

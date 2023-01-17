@@ -7,7 +7,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 
-use tracing::{info, debug};
+use tracing::{info, debug, error};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 use crate::peer_types::PeerMsgType;
@@ -105,9 +105,12 @@ impl PeerReader {
 /*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
                 br = true;
             }
-*/            else => {
+             */
+            else => {
                 info!("Peer Server Remote has closed");
-                kill.send(SHUTDOWN).expect("Unable to send shutdown");
+                if kill.send(SHUTDOWN).is_err() {
+                    error!("Unable to send shutdown");
+                }
                 br = true;
             }
         }
@@ -124,7 +127,6 @@ impl PeerReader {
 
         select! {
             Some(msg_b) = client_rx.recv() => {
-                //  Some(msg_b) = self.client_rx.as_mut().unwrap().recv(), if self.client_rx.is_some() => {
                 info!("received X local channel peer server value is {:?}", msg_b);
 
                 match msg_b {
@@ -151,9 +153,12 @@ impl PeerReader {
 /*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
                 br = true;
             }
-*/            else => {
+             */
+            else => {
                 info!("No client transmitters, server must have dropped");
-                kill.send(SHUTDOWN).expect("Unable to send shutdown");
+                if kill.send(SHUTDOWN).is_err() {
+                    error!("Unable to send shutdown");
+                }
                 br = true;
             }
         }

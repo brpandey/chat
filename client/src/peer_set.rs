@@ -54,6 +54,12 @@ impl PeerSet {
         Ok(None) // no more peer clients left and arc has been consumed
     }
 
+    pub async fn abort_all(&mut self) {
+        info!("attempting to abort all");
+        self.set.as_mut().unwrap().lock().await.abort_all();
+        info!("finished abort all");
+    }
+
     pub async fn spawn_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
         self.set.as_mut().unwrap().lock().await
             .spawn(PeerClient::nospawn_a(server, client_name, peer_name, io_shared));

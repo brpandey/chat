@@ -5,7 +5,7 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tokio::task::JoinHandle;
 
 //use tracing_subscriber::fmt;
-use tracing::{info, debug, /*error*/};
+use tracing::{info, debug, error};
 
 use protocol::{ChatMsg, Request, Response};
 
@@ -17,7 +17,9 @@ use crate::input_shared::InputShared;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
-const SHUTDOWN: u8 = 1;
+
+const SHUTDOWN_SERVER: u8 = 1;
+const SHUTDOWN_QUIT: u8 = 2;
 
 pub struct Client {
     id: u16,
@@ -90,13 +92,23 @@ impl Client {
 
         // start up peer server for clients that connect to this node for peer to peer chat.
         let local_server_handle =
-            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set, shutdown_rx1);
+            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set.clone(), shutdown_rx1);
 
         // If client needs to shut down, close the lobby
         // indicate that only existing peer client conversations are now only running if any
         // should the user type \\sessions command
-        if let Ok(_) = shutdown_rx2.recv().await {
-            io_shared.notify(InputMsg::CloseLobby).await.expect("Unable to send close lobby");
+        if let Ok(value) = shutdown_rx2.recv().await {
+            if io_shared.notify(InputMsg::CloseLobby).await.is_err() {
+                error!("unable to send close lobby");
+            }
+
+            // if server has closed (e.g. SHUTDOWN_SERVER)
+            // don't automatically kill peers, if active
+            // allow peer to peer conversations w/o main server being active
+            // however if quit than kill all
+            if value == SHUTDOWN_QUIT {
+                peer_set.abort_all().await;
+            }
         }
 
         let futures = vec![
@@ -159,7 +171,7 @@ impl Client {
                     } => {
                         if server_input.is_none() { // if input handler has received a terminate
                             info!("!!Server Remote has closed, sending shutdown msg A");
-                            shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            shutdown_tx.send(SHUTDOWN_SERVER).expect("Unable to send shutdown");
                             return
                         }
                     }
@@ -222,7 +234,7 @@ impl Client {
                     } => {
                         if input.is_err() { // if input handler has received a terminate
                             info!("sending shutdown msg C");
-                            shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
+                            shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
                             return
                         }
                     }
