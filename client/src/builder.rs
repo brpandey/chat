@@ -12,7 +12,7 @@ type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
 use protocol::{Request, Ask, ChatCodec};
 
 use crate::client::Client;
-use crate::types::{PeerMsgType, InputMsg};
+use crate::types::{PeerMsg, InputMsg};
 use crate::peer_client::PeerClient;
 use crate::peer_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
 use crate::input_shared::InputShared;
@@ -62,7 +62,7 @@ impl PeerClientBuilder {
     }
 
     // Used for PeerClient type B to link up with local server
-    pub fn connect_local(mut self, client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>) -> Self {
+    pub fn connect_local(mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>) -> Self {
         // stash r+w handles
         self.rh = Some(ReadHandle::B(client_rx));
         self.wh = Some(WriteHandle::B(server_tx));

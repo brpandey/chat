@@ -9,7 +9,7 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tracing::{info, debug, error};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
-use crate::types::{PeerMsgType, InputMsg};
+use crate::types::{PeerMsg, InputMsg};
 use crate::input_shared::InputNotifier;
 use crate::input_reader::InputReader;
 
@@ -24,13 +24,13 @@ const PEER_HELLO: &str = "Peer {} is ready to chat";
 #[derive(Debug)]
 pub enum ReadHandle {
     A(FrRead), // read from tcp connection
-    B(Receiver<PeerMsgType>), // read from local channel from local server
+    B(Receiver<PeerMsg>), // read from local channel from local server
 }
 
 #[derive(Debug)]
 pub enum WriteHandle {
     A(FrWrite), // write back using tcp write
-    B(Sender<PeerMsgType>), // write to local channel to local server
+    B(Sender<PeerMsg>), // write to local channel to local server
 }
 
 // Read and display peer server response
@@ -118,7 +118,7 @@ impl PeerReader {
         br
     }
 
-    async fn peer_read_b(kill: &mut ShutdownTx, client_rx: &mut Receiver<PeerMsgType>,
+    async fn peer_read_b(kill: &mut ShutdownTx, client_rx: &mut Receiver<PeerMsg>,
                          io_id: u16, io_notify: &InputNotifier) -> bool {
         // Type B code
         // Display server received message and as peer B respond as fit
@@ -131,12 +131,12 @@ impl PeerReader {
 
                 match msg_b {
                     // if peer A wants to leave then terminate this peer 
-                    PeerMsgType::Leave(name) => {
+                    PeerMsg::Leave(name) => {
                         println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap_or_default());
                         kill.send(SHUTDOWN).expect("Unable to send shutdown");
                         br = true;
                     },
-                    PeerMsgType::Hello(name, msg) => {
+                    PeerMsg::Hello(name, msg) => {
                         // since peer type b is create after tcp request name is not provided initially
                         // hence record name given hello protocol msg
                         io_notify.send(InputMsg::UpdatedSessionName(io_id, name))
@@ -145,7 +145,7 @@ impl PeerReader {
                         println!("< {}, to chat, type: \\sw {} (peer type B), to return to lobby, type: \\sw 0 >",
                                  std::str::from_utf8(&msg).unwrap_or_default(), InputReader::session_id(io_id));
                     },
-                    PeerMsgType::Note(msg) => {
+                    PeerMsg::Note(msg) => {
                         println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
                     },
                 }
@@ -200,10 +200,10 @@ impl PeerWriter {
                             info!("handle_peer_write: peer type B {:?}", &msg);
                             match msg {
                                 Ask::Note(m) => {
-                                    server_tx.send(PeerMsgType::Note(m)).await.expect("Unable to tx");
+                                    server_tx.send(PeerMsg::Note(m)).await.expect("Unable to tx");
                                 },
                                 Ask::Leave(m) => {
-                                    server_tx.send(PeerMsgType::Leave(m)).await.expect("Unable to tx");
+                                    server_tx.send(PeerMsg::Leave(m)).await.expect("Unable to tx");
                                 },
                                 _ => unimplemented!(),
                             }

@@ -8,7 +8,7 @@ pub enum InputMsg {
 }
 
 #[derive(Debug)]
-pub enum PeerMsgType {
+pub enum PeerMsg {
     Hello(String, Vec<u8>),
     Note(Vec<u8>),
     Leave(Vec<u8>),

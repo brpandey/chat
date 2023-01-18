@@ -7,7 +7,7 @@ use std::io::ErrorKind;
 
 use crate::peer_set::PeerSet;
 use crate::peer_server_request_handler::PeerServerRequestHandler;
-use crate::types::PeerMsgType;
+use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
 
 use tracing::info;
@@ -38,8 +38,8 @@ impl PeerServerListener {
 
                         // create msg queues between peer client and peer server handler
                         // so they can easily communicate with each other
-                        let (client_tx, client_rx) = mpsc::channel::<PeerMsgType>(64);
-                        let (server_tx, server_rx) = mpsc::channel::<PeerMsgType>(64);
+                        let (client_tx, client_rx) = mpsc::channel::<PeerMsg>(64);
+                        let (server_tx, server_rx) = mpsc::channel::<PeerMsg>(64);
 
                         // For each new peer that wants to connect with this node e.g. N1
                         // spawn a separate peer client of type B that locally communicates with peer server

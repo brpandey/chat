@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio::sync::mpsc::{Sender, Receiver};
 
-use crate::types::PeerMsgType;
+use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
 use crate::peer_client::PeerClient;
 
@@ -65,7 +65,7 @@ impl PeerSet {
             .spawn(PeerClient::nospawn_a(server, client_name, peer_name, io_shared));
     }
 
-    pub async fn spawn_b(&mut self, client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
+    pub async fn spawn_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
                          name: String, io_shared: InputShared) {
         self.set.as_mut().unwrap().lock().await
             .spawn(PeerClient::nospawn_b(client_rx, server_tx, name, io_shared));

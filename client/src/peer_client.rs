@@ -4,7 +4,7 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use protocol::Ask;
 use crate::builder::PeerClientBuilder as Builder;
-use crate::types::{PeerMsgType, InputMsg};
+use crate::types::{PeerMsg, InputMsg};
 use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
 
@@ -40,7 +40,7 @@ impl PeerClient {
         ()
     }
 
-    pub async fn nospawn_b(client_rx: Receiver<PeerMsgType>, server_tx: Sender<PeerMsgType>,
+    pub async fn nospawn_b(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
                    name: String, io_shared: InputShared) -> () {
         if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
             client.run(io_shared).await;
@@ -71,8 +71,8 @@ impl PeerClient {
 
     // client type B is the interative part of the peer type B server on the same node
     // client type B is connected to the peer type B through channels
-    pub async fn build_b(client_rx: Receiver<PeerMsgType>,
-                         server_tx: Sender<PeerMsgType>,
+    pub async fn build_b(client_rx: Receiver<PeerMsg>,
+                         server_tx: Sender<PeerMsg>,
                          name: String,
                          io_shared: &InputShared)
                          -> io::Result<PeerClient> {

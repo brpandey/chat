@@ -7,7 +7,7 @@ use tokio_stream::StreamExt;
 use futures::SinkExt;
 use tracing::{info, debug};
 
-use crate::types::PeerMsgType;
+use crate::types::PeerMsg;
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 
 const PEER_LEFT: &str = "Peer {} has left";
@@ -21,28 +21,28 @@ pub struct PeerServerRequestHandler {
 
 struct PeerServerReader {
     tcp_read: Option<tcp::OwnedReadHalf>,
-    local_tx: Sender<PeerMsgType>,
-    peer_b_client_tx: Sender<PeerMsgType>,
+    local_tx: Sender<PeerMsg>,
+    peer_b_client_tx: Sender<PeerMsg>,
     name: String,
 }
 
 struct PeerServerWriter {
     tcp_write: Option<tcp::OwnedWriteHalf>,
-    local_rx: Receiver<PeerMsgType>,
-    peer_b_server_rx: Receiver<PeerMsgType>,
+    local_rx: Receiver<PeerMsg>,
+    peer_b_server_rx: Receiver<PeerMsg>,
 }
 
 const BOUNDED_CHANNEL_SIZE: usize = 64;
 
 impl PeerServerRequestHandler {
     pub fn new(tcp_read: tcp::OwnedReadHalf, tcp_write: tcp::OwnedWriteHalf,
-               peer_b_client_tx: Sender<PeerMsgType>,
-               peer_b_server_rx: Receiver<PeerMsgType>,
+               peer_b_client_tx: Sender<PeerMsg>,
+               peer_b_server_rx: Receiver<PeerMsg>,
                name: String
     ) -> Self {
 
         // Setup server local msg passing channel
-        let (local_tx, local_rx) = mpsc::channel::<PeerMsgType>(BOUNDED_CHANNEL_SIZE);
+        let (local_tx, local_rx) = mpsc::channel::<PeerMsg>(BOUNDED_CHANNEL_SIZE);
 
         Self {
             reader: Some(PeerServerReader {
@@ -94,17 +94,17 @@ impl PeerServerReader {
                         let name_str = String::from_utf8(name).unwrap_or_default();
                         let hello_msg = PEER_HELLO.replace("{}", &name_str).into_bytes();
                         // send msg to this local peer b node
-                        self.peer_b_client_tx.send(PeerMsgType::Hello(name_str, hello_msg)).await
+                        self.peer_b_client_tx.send(PeerMsg::Hello(name_str, hello_msg)).await
                                             .expect("Unable to tx");
                         // send response msg back to peer a with peer b's name
-                        self.local_tx.send(PeerMsgType::Hello(String::new(),
+                        self.local_tx.send(PeerMsg::Hello(String::new(),
                                                               self.name.clone().into_bytes())).await // send back peer b server's name
                             .expect("Unable to tx");
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {
                         self.process_disconnect(name).await;
                         // send local msg 
-                        self.local_tx.send(PeerMsgType::Leave(vec![])).await // send back peer b server's name
+                        self.local_tx.send(PeerMsg::Leave(vec![])).await // send back peer b server's name
                             .expect("Unable to tx");
 
                         break;
@@ -114,7 +114,7 @@ impl PeerServerReader {
                         let split_msg = split_msg(msg);
 
                         // send msg received from peer a to local peer b node
-                        self.peer_b_client_tx.send(PeerMsgType::Note(split_msg.clone())).await
+                        self.peer_b_client_tx.send(PeerMsg::Note(split_msg.clone())).await
                             .expect("Unable to tx");
                     },
                     Ok(_) => unimplemented!(),
@@ -137,7 +137,7 @@ impl PeerServerReader {
         let leave_msg = PEER_LEFT.replace("{}", name_str).into_bytes();
 
         // signal to peer b client that peer a has left
-        self.peer_b_client_tx.send(PeerMsgType::Leave(leave_msg)).await
+        self.peer_b_client_tx.send(PeerMsg::Leave(leave_msg)).await
             .expect("Unable to tx");
     }
 }
@@ -157,11 +157,11 @@ impl PeerServerWriter {
                     info!("Peer server A - received in its local msg queue: {:?}", &msg_a);
 
                     match msg_a {
-                        PeerMsgType::Hello(_, m) => {
+                        PeerMsg::Hello(_, m) => {
                             reply = Reply::Hello(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
-                        PeerMsgType::Leave(_) => return,
+                        PeerMsg::Leave(_) => return,
                         _ => unimplemented!(),
                     }
                 }
@@ -169,13 +169,13 @@ impl PeerServerWriter {
                     info!("Peer server B - received in its local client-server msg queue: {:?}", &msg_b);
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
-                        PeerMsgType::Leave(m) => { // case where peer b (as opposed to peer a) wants to leave
+                        PeerMsg::Leave(m) => { // case where peer b (as opposed to peer a) wants to leave
                             info!("reply back to client with Leave ");
                             reply = Reply::Leave(m);
                             fw.send(reply).await.expect("Unable to write to server");
                             return
                         },
-                        PeerMsgType::Note(m) => {
+                        PeerMsg::Note(m) => {
                             info!("reply back to client with Note ");
                             reply = Reply::Note(m);
                             fw.send(reply).await.expect("Unable to write to server")
