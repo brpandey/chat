@@ -43,7 +43,7 @@ impl PeerServerListener {
 
                         // For each new peer that wants to connect with this node e.g. N1
                         // spawn a separate peer client of type B that locally communicates with peer server
-                        peer_set.spawn_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
+                        peer_set.spawn_peer_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
 
                         let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
                         handler.spawn().await;

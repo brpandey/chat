@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
-use crate::peer_client::PeerClient;
+use crate::peer_client::{PeerA, PeerB};
 
 use tracing::{info, /*error*/};
 
@@ -60,14 +60,14 @@ impl PeerSet {
         info!("finished abort all");
     }
 
-    pub async fn spawn_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
+    pub async fn spawn_peer_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
         self.set.as_mut().unwrap().lock().await
-            .spawn(PeerClient::nospawn_a(server, client_name, peer_name, io_shared));
+            .spawn(PeerA::spawn_ready(server, client_name, peer_name, io_shared));
     }
 
-    pub async fn spawn_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
+    pub async fn spawn_peer_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
                          name: String, io_shared: InputShared) {
         self.set.as_mut().unwrap().lock().await
-            .spawn(PeerClient::nospawn_b(client_rx, server_tx, name, io_shared));
+            .spawn(PeerB::spawn_ready(client_rx, server_tx, name, io_shared));
     }
 }

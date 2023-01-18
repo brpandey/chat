@@ -12,6 +12,73 @@ use tracing::{info, /*debug, */error};
 
 const SHUTDOWN: u8 = 1;
 
+pub struct PeerA; // unit struct
+
+impl PeerA {
+    pub async fn spawn_ready(server: String, name: String, peer_name: String, io_shared: InputShared) -> () {
+        if let Ok(mut client) = PeerA::build(server, name, peer_name, &io_shared).await {
+            // peer A initiates hello since it initiated the session!
+            client.send_hello().await;
+            client.run(io_shared).await;
+        }
+
+        ()
+    }
+
+    // client is peer type A which initiates a reaquest to an already running peer B
+    // client type A is not connected to the peer B server other than through tcp
+    pub async fn build(server: String,
+                         name: String,
+                         peer_name: String,
+                         io_shared: &InputShared) -> io::Result<PeerClient> {
+
+        let client = Builder::new(name)
+            .connect(&server).await?
+            .channels()
+            .io_register_notify(io_shared, peer_name).await
+            .build();
+
+        info!("New peer A, name: {} io_id: {}, successful tcp connect to peer server {:?}",
+              &client.name, client.io_id, &server);
+
+        Ok(client)
+    }
+}
+
+pub struct PeerB; // unit struct
+
+impl PeerB {
+    pub async fn spawn_ready(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
+                           name: String, io_shared: InputShared) -> () {
+        if let Ok(mut client) = PeerB::build(client_rx, server_tx, name, &io_shared).await {
+            client.run(io_shared).await;
+        }
+
+        ()
+    }
+
+    // client type B is the interative part of the peer type B server on the same node
+    // client type B is connected to the peer type B through channels
+    pub async fn build(client_rx: Receiver<PeerMsg>,
+                         server_tx: Sender<PeerMsg>,
+                         name: String,
+                         io_shared: &InputShared)
+                         -> io::Result<PeerClient> {
+
+        let client = Builder::new(name)
+            .connect_local(client_rx, server_tx)
+            .channels()
+            .io_register(io_shared).await
+            .build();
+
+        info!("New peer B, name: {} io_id: {}, set up local channel to local peer server",
+              &client.name, client.io_id);
+
+        Ok(client)
+    }
+}
+
+
 //#[derive(Debug)]
 pub struct PeerClient {
     name: String,
@@ -28,65 +95,6 @@ impl PeerClient {
             local_tx,
             builder,
         }
-    }
-
-    pub async fn nospawn_a(server: String, name: String, peer_name: String, io_shared: InputShared) -> () {
-        if let Ok(mut client) = PeerClient::build_a(server, name, peer_name, &io_shared).await {
-            // peer A initiates hello since it initiated the session!
-            client.send_hello().await;
-            client.run(io_shared).await;
-        }
-
-        ()
-    }
-
-    pub async fn nospawn_b(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
-                   name: String, io_shared: InputShared) -> () {
-        if let Ok(mut client) = PeerClient::build_b(client_rx, server_tx, name, &io_shared).await {
-            client.run(io_shared).await;
-        }
-
-        ()
-    }
-
-
-    // client is peer type A which initiates a reaquest to an already running peer B
-    // client type A is not connected to the peer B server other than through tcp
-    pub async fn build_a(server: String,
-                           name: String,
-                           peer_name: String,
-                           io_shared: &InputShared) -> io::Result<PeerClient> {
-
-        let client = Builder::new(name)
-            .connect(&server).await?
-            .channels()
-            .io_register_notify(io_shared, peer_name).await
-            .build();
-
-        info!("New peer client A, name: {} io_id: {}, successful tcp connect to peer server {:?}",
-              &client.name, client.io_id, &server);
-
-        Ok(client)
-    }
-
-    // client type B is the interative part of the peer type B server on the same node
-    // client type B is connected to the peer type B through channels
-    pub async fn build_b(client_rx: Receiver<PeerMsg>,
-                         server_tx: Sender<PeerMsg>,
-                         name: String,
-                         io_shared: &InputShared)
-                         -> io::Result<PeerClient> {
-
-        let client = Builder::new(name)
-            .connect_local(client_rx, server_tx)
-            .channels()
-            .io_register(io_shared).await
-            .build();
-
-        info!("New peer client B, name: {} io_id: {}, set up local channel to local peer server",
-              &client.name, client.io_id);
-
-        Ok(client)
     }
 
     async fn send_hello(&mut self) {

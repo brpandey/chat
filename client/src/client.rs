@@ -63,7 +63,7 @@ impl Client {
             println!(">>> Registered as name: {}, switch id is {}",
                      std::str::from_utf8(&name).unwrap(),
                      InputReader::session_id(self.io_id));
-            
+
             self.name = String::from_utf8(name).unwrap_or_default();
             self.id = id;
         } else {
@@ -160,7 +160,7 @@ impl Client {
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);
-                                peer_set.spawn_a(addr_str, client_name.clone(), peer_name, io_shared.clone()).await;
+                                peer_set.spawn_peer_a(addr_str, client_name.clone(), peer_name, io_shared.clone()).await;
                             },
                             Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                                 println!(">>> Unable to fork into private session as peer {} unavailable",
