@@ -2,21 +2,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Sender as MSender;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::watch::Receiver;
 //use tracing::info;
 
-use crate::input_handler::InputMsg;
+use crate::types::InputMsg;
+use crate::input_handler::{IO_ID_LOBBY, InputReceiver};
+use crate::input_reader::IO_ID_OFFSET;
 
-pub type InputNotifier = MSender<InputMsg>;
-pub type InputReceiver = Receiver<(u16, u16)>;
-pub type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
-pub type Sessions = RwLock<HashMap<u16, String>>;
-
-pub const IO_ID_OFFSET: u16 = 1000;
-const IO_ID_LOBBY: u16 = 1000;
-
+pub type InputNotifier = crate::input_handler::InputNotifier;
+type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
+type Sessions = RwLock<HashMap<u16, String>>;
 
 pub struct InputBase {
     current: IdLinePair,

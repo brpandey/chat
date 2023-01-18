@@ -4,8 +4,8 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use protocol::Ask;
 use crate::builder::PeerClientBuilder as Builder;
-use crate::peer_types::PeerMsgType;
-use crate::input_handler::{InputMsg, InputHandler};
+use crate::types::{PeerMsgType, InputMsg};
+use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
 
 use tracing::{info, /*debug, */error};
@@ -122,7 +122,7 @@ impl PeerClient {
 
                 select! {
                     input = async {
-                        let req = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared).await?
+                        let req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
                             .and_then(|m| PeerClient::parse_input(&name, m));
 
                         if req.is_some() {
@@ -168,7 +168,7 @@ impl PeerClient {
                 // if no commands, split up user input
                 let mut out = vec![];
                 out.push(format!("<{}> ", name).into_bytes());
-                let msg = InputHandler::interleave_newlines(l, out);
+                let msg = InputReader::interleave_newlines(l, out);
                 return Some(Ask::Note(msg))
             },
         }

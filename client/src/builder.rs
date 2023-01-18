@@ -12,10 +12,9 @@ type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
 use protocol::{Request, Ask, ChatCodec};
 
 use crate::client::Client;
+use crate::types::{PeerMsgType, InputMsg};
 use crate::peer_client::PeerClient;
-use crate::peer_types::PeerMsgType;
 use crate::peer_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
-use crate::input_handler::InputMsg;
 use crate::input_shared::InputShared;
 
 use tracing::{info, error};

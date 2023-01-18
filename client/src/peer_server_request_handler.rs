@@ -7,7 +7,7 @@ use tokio_stream::StreamExt;
 use futures::SinkExt;
 use tracing::{info, debug};
 
-use crate::peer_types::PeerMsgType;
+use crate::types::PeerMsgType;
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
 
 const PEER_LEFT: &str = "Peer {} has left";

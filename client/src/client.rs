@@ -12,7 +12,8 @@ use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::PeerSet;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::input_handler::{IO_ID_OFFSET, InputMsg, InputHandler};
+use crate::types::InputMsg;
+use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
@@ -50,7 +51,7 @@ impl Client {
     }
 
     pub async fn register(&mut self) -> io::Result<()> {
-        if let Ok(Some(name)) = InputHandler::read_sync_user_input(GREETINGS) {
+        if let Ok(Some(name)) = InputReader::blocking_read(GREETINGS) {
             self.builder.fw.as_mut().unwrap().send(Request::JoinName(name))
                 .await.expect("Unable to write to server");
         } else {
@@ -59,7 +60,10 @@ impl Client {
         }
 
         if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.builder.fr.as_mut().unwrap().next().await {
-            println!(">>> Registered as name: {}, switch id is {}", std::str::from_utf8(&name).unwrap(), self.io_id - IO_ID_OFFSET);
+            println!(">>> Registered as name: {}, switch id is {}",
+                     std::str::from_utf8(&name).unwrap(),
+                     InputReader::session_id(self.io_id));
+            
             self.name = String::from_utf8(name).unwrap_or_default();
             self.id = id;
         } else {
@@ -223,7 +227,7 @@ impl Client {
             loop {
                 select! {
                     input = async {
-                        let req = InputHandler::read_async_user_input(io_id, &mut input_rx, &io_shared).await?
+                        let req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
                             .and_then(|m| Client::parse_input(&name, m));
 
                         if req.is_some() {
@@ -273,7 +277,7 @@ impl Client {
             },
             l => {
                 // if no commands, split up user input
-                let msg = InputHandler::interleave_newlines(l, vec![]);
+                let msg = InputReader::interleave_newlines(l, vec![]);
                 return Some(Request::Message(msg))
             },
         }

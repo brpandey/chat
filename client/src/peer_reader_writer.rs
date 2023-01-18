@@ -1,8 +1,7 @@
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Sender, Receiver};
-use tokio::sync::broadcast::Sender as BSender;
-use tokio::sync::broadcast::Receiver as BReceiver;
+use tokio::sync::broadcast::{Sender as BSender, Receiver as BReceiver};
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
@@ -10,8 +9,9 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tracing::{info, debug, error};
 
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
-use crate::peer_types::PeerMsgType;
-use crate::input_handler::{IO_ID_OFFSET, InputNotifier, InputMsg};
+use crate::types::{PeerMsgType, InputMsg};
+use crate::input_shared::InputNotifier;
+use crate::input_reader::InputReader;
 
 type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
 type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
@@ -143,7 +143,7 @@ impl PeerReader {
                             .await.expect("Unable to send close sesion msg");
 
                         println!("< {}, to chat, type: \\sw {} (peer type B), to return to lobby, type: \\sw 0 >",
-                                 std::str::from_utf8(&msg).unwrap_or_default(), io_id - IO_ID_OFFSET);
+                                 std::str::from_utf8(&msg).unwrap_or_default(), InputReader::session_id(io_id));
                     },
                     PeerMsgType::Note(msg) => {
                         println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());

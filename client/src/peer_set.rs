@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio::sync::mpsc::{Sender, Receiver};
 
-use crate::peer_types::PeerMsgType;
+use crate::types::PeerMsgType;
 use crate::input_shared::InputShared;
 use crate::peer_client::PeerClient;
 
