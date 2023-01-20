@@ -1,20 +1,18 @@
 use tokio::select;
 use tokio::net::tcp;
-use tokio::sync::mpsc::{Sender, Receiver};
-use tokio::sync::broadcast::{Sender as BSender, Receiver as BReceiver};
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio::sync::mpsc::{Receiver};
+use tokio::sync::broadcast::{Sender as BSender};
+use tokio_util::codec::{FramedRead};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
-use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 
 use tracing::{info, debug, error};
 
-use protocol::{Ask, ChatCodec, ChatMsg, Reply};
+use protocol::{ChatCodec, ChatMsg, Reply};
 use crate::types::{PeerMsg, InputMsg};
 use crate::input_shared::InputNotifier;
 use crate::input_reader::InputReader;
 
 type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
-type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
 type ShutdownTx = BSender<u8>;
 
 const SHUTDOWN: u8 = 1;
@@ -25,12 +23,6 @@ const PEER_HELLO: &str = "Peer {} is ready to chat";
 pub enum ReadHandle {
     A(FrRead), // read from tcp connection
     B(Receiver<PeerMsg>), // read from local channel from local server
-}
-
-#[derive(Debug)]
-pub enum WriteHandle {
-    A(FrWrite), // write back using tcp write
-    B(Sender<PeerMsg>), // write to local channel to local server
 }
 
 // Read and display peer server response
@@ -107,7 +99,7 @@ impl PeerReader {
             }
              */
             else => {
-                info!("Peer Server Remote has closed");
+                info!("Peer Server Remote has closed!");
                 if kill.send(SHUTDOWN).is_err() {
                     error!("Unable to send shutdown");
                 }
@@ -164,56 +156,5 @@ impl PeerReader {
         }
 
         br
-    }
-}
-
-#[derive(Debug)]
-pub struct PeerWriter {
-    write: WriteHandle,
-    local_rx: Receiver<Ask>,
-    shutdown_rx: BReceiver<u8>,
-}
-
-impl PeerWriter {
-    pub fn new(write: WriteHandle,
-               local_rx: Receiver<Ask>,
-               shutdown_rx: BReceiver<u8>)
-               -> Self {
-        Self {
-            write,
-            local_rx,
-            shutdown_rx,
-        }
-    }
-
-    pub async fn handle_peer_write(&mut self) {
-        loop {
-            select! {
-                // Read from channel, data received from command line
-                Some(msg) = self.local_rx.recv() => {
-                    match &mut self.write {
-                        WriteHandle::A(ref mut fw) => {
-                            info!("handle_peer_write: peer type A {:?}", &msg);
-                            fw.send(msg).await.expect("Unable to write to tcp server");
-                        },
-                        WriteHandle::B(ref server_tx) => {
-                            info!("handle_peer_write: peer type B {:?}", &msg);
-                            match msg {
-                                Ask::Note(m) => {
-                                    server_tx.send(PeerMsg::Note(m)).await.expect("Unable to tx");
-                                },
-                                Ask::Leave(m) => {
-                                    server_tx.send(PeerMsg::Leave(m)).await.expect("Unable to tx");
-                                },
-                                _ => unimplemented!(),
-                            }
-                        }
-                    }
-                }
-                _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
-                    return
-                }
-            }
-        }
     }
 }

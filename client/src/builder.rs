@@ -14,7 +14,8 @@ use protocol::{Request, Ask, ChatCodec};
 use crate::client::Client;
 use crate::types::{PeerMsg, InputMsg};
 use crate::peer_client::PeerClient;
-use crate::peer_client_reader_writer::{ReadHandle, WriteHandle, PeerReader, PeerWriter};
+use crate::peer_client_reader::{ReadHandle, PeerReader};
+use crate::peer_client_writer::{WriteHandle, PeerWriter};
 use crate::input_shared::InputShared;
 
 use tracing::{info, error};
