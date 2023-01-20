@@ -67,6 +67,7 @@ impl PeerReader {
         }
     }
 
+
     async fn peer_read_a(kill: &mut ShutdownTx, kill_rx: &mut ShutdownRx, fr: &mut FrRead) -> bool {
         // Type A code
         // Read lines from server via tcp if we are peer A in the above scenario
@@ -74,7 +75,8 @@ impl PeerReader {
         let mut br = false; // break value
 
         select! {
-            Some(msg_a) = fr.next() => {
+            peer_data = async {
+                let msg_a = fr.next().await?;
                 info!("received Y tcp peer server value is {:?}", msg_a);
 
                 match msg_a {
@@ -97,15 +99,18 @@ impl PeerReader {
                         br = true;
                     },
                 }
+
+                Some(())
+            } => {
+                if peer_data.is_none() { // if input handler has received a terminate
+                    info!("Peer Server Remote has closed!");
+                    if kill.send(SHUTDOWN).is_err() {
+                        error!("Unable to send shutdown");
+                    }
+                    br = true;
+                }
             }
             _ = kill_rx.recv() => { // exit task if any shutdown received
-                br = true;
-            }
-            else => {
-                info!("Peer Server Remote has closed!");
-                if kill.send(SHUTDOWN).is_err() {
-                    error!("Unable to send shutdown");
-                }
                 br = true;
             }
         }
@@ -146,13 +151,6 @@ impl PeerReader {
                 }
             }
             _ = kill_rx.recv() => { // exit task if any shutdown received
-                br = true;
-            }
-            else => {
-                info!("No client transmitters, server must have dropped");
-                if kill.send(SHUTDOWN).is_err() {
-                    error!("Unable to send shutdown");
-                }
                 br = true;
             }
         }
