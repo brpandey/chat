@@ -5,21 +5,31 @@ use tracing::info;
 
 use crate::input_shared::InputShared;
 use crate::input_handler::InputReceiver;
+use crate::input_handler::IO_ID_LOBBY;
 
-pub const IO_ID_OFFSET: u16 = crate::input_handler::IO_ID_LOBBY;
+pub const IO_ID_OFFSET: u16 = IO_ID_LOBBY;
 const USER_LINES: usize = 64;
+
+pub fn lobby_id() -> u16 {
+    IO_ID_LOBBY
+}
+
+pub fn is_lobby(io_id: u16) -> bool {
+    io_id == IO_ID_OFFSET
+}
+
+pub fn session_id(io_id: u16) -> u16 {
+    io_id - IO_ID_OFFSET
+}
+
+pub fn io_id(session_id: u16) -> u16 {
+    session_id + IO_ID_OFFSET
+}
+
 
 pub struct InputReader;
 
 impl InputReader {
-
-    pub fn session_id(io_id: u16) -> u16 {
-        io_id - IO_ID_OFFSET
-    }
-
-    pub fn io_id(session_id: u16) -> u16 {
-        session_id + IO_ID_OFFSET
-    }
 
     // blocking function to gather user input from std::io::stdin
     // should be called first for name registration

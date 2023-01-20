@@ -13,7 +13,7 @@ const QUIT_STR: &str = "\\quit";
 
 use crate::types::InputMsg;
 use crate::input_shared::InputShared;
-use crate::input_reader::InputReader;
+use crate::input_reader::io_id;
 
 #[derive(Debug)]
 pub enum InputCmd {
@@ -60,7 +60,7 @@ impl InputHandler {
             value if value.starts_with("\\switch") || value.starts_with("\\sw") => {
                 if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
                     let switch_id_str = id_str.to_owned(); // &str to String
-                    let switch_id = InputReader::io_id(switch_id_str.parse::<u16>().unwrap_or_default()); // String to u16
+                    let switch_id = io_id(switch_id_str.parse::<u16>().unwrap_or_default()); // String to u16
                     info!("Attempting to switch input to {}", &switch_id);
                     cmd_tx.blocking_send(InputCmd::Switch(switch_id)).unwrap();
                 }

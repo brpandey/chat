@@ -13,7 +13,7 @@ use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::PeerSet;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::types::InputMsg;
-use crate::input_reader::InputReader;
+use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
@@ -61,8 +61,7 @@ impl Client {
 
         if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.builder.fr.as_mut().unwrap().next().await {
             println!(">>> Registered as name: {}, switch id is {}",
-                     std::str::from_utf8(&name).unwrap(),
-                     InputReader::session_id(self.io_id));
+                     std::str::from_utf8(&name).unwrap(), session_id(self.io_id));
 
             self.name = String::from_utf8(name).unwrap_or_default();
             self.id = id;

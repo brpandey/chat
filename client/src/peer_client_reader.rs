@@ -10,7 +10,7 @@ use tracing::{info, debug, error};
 use protocol::{ChatCodec, ChatMsg, Reply};
 use crate::types::{PeerMsg, InputMsg};
 use crate::input_shared::InputNotifier;
-use crate::input_reader::InputReader;
+use crate::input_reader::session_id;
 
 type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
 type ShutdownTx = BSender<u8>;
@@ -135,7 +135,7 @@ impl PeerReader {
                             .await.expect("Unable to send close sesion msg");
 
                         println!("< {}, to chat, type: \\sw {} (peer type B), to return to lobby, type: \\sw 0 >",
-                                 std::str::from_utf8(&msg).unwrap_or_default(), InputReader::session_id(io_id));
+                                 std::str::from_utf8(&msg).unwrap_or_default(), session_id(io_id));
                     },
                     PeerMsg::Note(msg) => {
                         println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());

@@ -6,10 +6,11 @@ use tokio::sync::mpsc::error::TrySendError;
 //use tracing::info;
 
 use crate::types::InputMsg;
-use crate::input_handler::{IO_ID_LOBBY, InputReceiver};
-use crate::input_reader::IO_ID_OFFSET;
+use crate::input_reader::{session_id, is_lobby, lobby_id};
 
 pub type InputNotifier = crate::input_handler::InputNotifier;
+type InputReceiver = crate::input_handler::InputReceiver;
+
 type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
 type Sessions = RwLock<HashMap<u16, String>>;
 
@@ -58,7 +59,7 @@ impl InputShared {
 
     pub(crate) async fn get_next_id(&self) -> u16 {
         let new_id = self.shared.counter.fetch_add(1, Ordering::Relaxed); // establish unique id for client
-        if new_id != IO_ID_LOBBY {
+        if !is_lobby(new_id) {
             self.shared.sessions.write().await.insert(new_id, String::new());     // add to RwLock
         }
         new_id
@@ -74,12 +75,12 @@ impl InputShared {
     }
 
     pub(crate) async fn close_session(&self, io_id: u16) -> bool {
-        self.display_and_switch_id(IO_ID_LOBBY).await &&
+        self.display_and_switch_id(lobby_id()).await &&
             self.remove_id(io_id).await
     }
 
     pub(crate) async fn close_lobby(&self) -> bool {
-        self.remove_id(IO_ID_LOBBY).await
+        self.remove_id(lobby_id()).await
     }
 
     // remove from RwLock
@@ -99,10 +100,10 @@ impl InputShared {
         }
 
         if switched {
-            if switch_id == IO_ID_LOBBY {
-                println!(">>> Auto switched back to main lobby {}", switch_id - IO_ID_OFFSET);
+            if is_lobby(switch_id) {
+                println!(">>> Auto switched back to main lobby {}", session_id(switch_id));
             } else {
-                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\sw 0", switch_id - IO_ID_OFFSET);
+                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\sw 0", session_id(switch_id));
             }
         }
 
@@ -163,10 +164,10 @@ impl InputShared {
                 prefix = "*";
             }
 
-            if *k == IO_ID_LOBBY {
-                println!("{}{}, broadcast chat in {}", prefix, *k - IO_ID_OFFSET, v);
+            if is_lobby(*k) {
+                println!("{}{}, broadcast chat in {}", prefix, session_id(*k), v);
             } else {
-                println!("{}{}, peer chat --> {}", prefix, *k - IO_ID_OFFSET, v);
+                println!("{}{}, peer chat --> {}", prefix, session_id(*k), v);
             }
 
             prefix = " ";
