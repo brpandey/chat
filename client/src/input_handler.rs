@@ -53,6 +53,9 @@ impl InputHandler {
 
         // handles terminal input switching
         match line.as_str() {
+            "\\lobby" | "\\lob" => {
+                cmd_tx.blocking_send(InputCmd::Switch(IO_ID_LOBBY)).unwrap();
+            },
             "\\sessions" | "\\ss" => {
                 info!("Sessions request...");
                 cmd_tx.blocking_send(InputCmd::Sessions).unwrap();
