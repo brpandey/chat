@@ -21,6 +21,7 @@ const MAIN_SERVER: &str = "127.0.0.1:43210";
 
 const SHUTDOWN_SERVER: u8 = 1;
 const SHUTDOWN_QUIT: u8 = 2;
+const SHUTDOWN_IO_DOWN: u8 = 3;
 
 pub struct Client {
     id: u16,
@@ -101,6 +102,7 @@ impl Client {
         // indicate that only existing peer client conversations are now only running if any
         // should the user type \\sessions command
         if let Ok(value) = shutdown_rx2.recv().await {
+            info!("Received shutdown quit, closing lobby {:?}", value);
             if io_shared.notify(InputMsg::CloseLobby).await.is_err() {
                 error!("unable to send close lobby");
             }
@@ -109,8 +111,9 @@ impl Client {
             // don't automatically kill peers, if active
             // allow peer to peer conversations w/o main server being active
             // however if quit than kill all
-            if value == SHUTDOWN_QUIT {
-                peer_set.abort_all().await;
+            if value == SHUTDOWN_QUIT || value == SHUTDOWN_IO_DOWN {
+                info!("Received shutdown quit, aborting peer set");
+                peer_set.abort_all();
             }
         }
 
@@ -230,6 +233,9 @@ impl Client {
                             .and_then(|m| Client::parse_input(&name, m));
 
                         if req.is_some() {
+                            if let Some(Request::Quit) = req {
+                                shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
+                            }
                             local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
                         }
 
@@ -237,7 +243,7 @@ impl Client {
                     } => {
                         if input.is_err() { // if input handler has received a terminate
                             info!("sending shutdown msg C");
-                            shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
+                            shutdown_tx.send(SHUTDOWN_IO_DOWN).expect("Unable to send shutdown");
                             return
                         }
                     }

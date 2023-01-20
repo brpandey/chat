@@ -79,7 +79,7 @@ impl PeerClientBuilder {
         self.local_tx = Some(local_tx);
 
         // stash peer reader and writers
-        self.reader = Some(PeerReader::new(self.rh.take().unwrap(), sd_tx.clone()));
+        self.reader = Some(PeerReader::new(self.rh.take().unwrap(), sd_tx.clone(), sd_tx.subscribe()));
         self.writer = Some(PeerWriter::new(self.wh.take().unwrap(), local_rx, sd_rx));
 
         // stash shutdown channel handles

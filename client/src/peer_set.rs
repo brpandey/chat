@@ -3,6 +3,7 @@ use tokio::io::{self, Error, ErrorKind};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::sync::broadcast::{self, Sender as BSender, Receiver as BReceiver};
 
 use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
@@ -10,13 +11,25 @@ use crate::peer_client::{PeerA, PeerB};
 
 use tracing::{info, /*error*/};
 
+const ABORT_ALL: u8 = 1;
+
 pub struct PeerSet {
     set: Option<Arc<Mutex<JoinSet<()>>>>,
+    abort_tx: Arc<BSender<u8>>,
+    #[allow(dead_code)]
+    abort_rx: Option<BReceiver<u8>>
 }
+
 
 impl PeerSet {
     pub fn new() -> Self {
-        Self { set: Some(Arc::new(Mutex::new(JoinSet::new()))) }
+        let (abort_tx, abort_rx) = broadcast::channel(1);
+
+        Self {
+            set: Some(Arc::new(Mutex::new(JoinSet::new()))),
+            abort_tx: Arc::new(abort_tx),
+            abort_rx: Some(abort_rx),
+        }
     }
 
     pub async fn is_empty(&self) -> bool {
@@ -29,7 +42,9 @@ impl PeerSet {
 
     pub fn clone(&mut self) -> Self {
         PeerSet {
-            set: Some(Arc::clone(&self.set.as_mut().unwrap()))
+            set: Some(Arc::clone(&self.set.as_mut().unwrap())),
+            abort_tx: Arc::clone(&self.abort_tx),
+            abort_rx: None,
         }
     }
 
@@ -54,20 +69,21 @@ impl PeerSet {
         Ok(None) // no more peer clients left and arc has been consumed
     }
 
-    pub async fn abort_all(&mut self) {
-        info!("attempting to abort all");
-        self.set.as_mut().unwrap().lock().await.abort_all();
-        info!("finished abort all");
+    pub fn abort_all(&mut self) {
+        self.abort_tx.send(ABORT_ALL).expect("Unable to send abort_all");
+        info!("sent abort all msg");
     }
 
     pub async fn spawn_peer_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
+        let abort_rx = self.abort_tx.subscribe();
         self.set.as_mut().unwrap().lock().await
-            .spawn(PeerA::spawn_ready(server, client_name, peer_name, io_shared));
+            .spawn(PeerA::spawn_ready(server, client_name, peer_name, io_shared, abort_rx));
     }
 
     pub async fn spawn_peer_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
-                         name: String, io_shared: InputShared) {
+                              name: String, io_shared: InputShared) {
+        let abort_rx = self.abort_tx.subscribe();
         self.set.as_mut().unwrap().lock().await
-            .spawn(PeerB::spawn_ready(client_rx, server_tx, name, io_shared));
+            .spawn(PeerB::spawn_ready(client_rx, server_tx, name, io_shared, abort_rx));
     }
 }

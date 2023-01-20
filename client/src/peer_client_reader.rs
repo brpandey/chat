@@ -1,7 +1,7 @@
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Receiver};
-use tokio::sync::broadcast::{Sender as BSender};
+use tokio::sync::broadcast::{Sender as BSender, Receiver as BReceiver};
 use tokio_util::codec::{FramedRead};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 
@@ -14,6 +14,7 @@ use crate::input_reader::session_id;
 
 type FrRead = FramedRead<tcp::OwnedReadHalf, ChatCodec>;
 type ShutdownTx = BSender<u8>;
+type ShutdownRx = BReceiver<u8>;
 
 const SHUTDOWN: u8 = 1;
 const PEER_HELLO: &str = "Peer {} is ready to chat";
@@ -30,13 +31,15 @@ pub enum ReadHandle {
 pub struct PeerReader {
     read: ReadHandle,
     kill: ShutdownTx,
+    kill_rx: ShutdownRx,
 }
 
 impl PeerReader {
-    pub fn new(read: ReadHandle, kill: ShutdownTx) -> Self {
+    pub fn new(read: ReadHandle, kill: ShutdownTx, kill_rx: ShutdownRx) -> Self {
         Self {
             read,
             kill,
+            kill_rx,
         }
     }
 
@@ -55,15 +58,16 @@ impl PeerReader {
             debug!("task A: listening to peer server replies...");
 
             match &mut self.read {
-                ReadHandle::A(ref mut fr) => br = Self::peer_read_a(&mut self.kill, fr).await,
-                ReadHandle::B(ref mut client_rx) => br = Self::peer_read_b(&mut self.kill, client_rx, io_id, &io_notify).await,
+                ReadHandle::A(ref mut fr) => br = Self::peer_read_a(&mut self.kill, &mut self.kill_rx, fr).await,
+                ReadHandle::B(ref mut client_rx) => br = Self::peer_read_b(&mut self.kill, &mut self.kill_rx,
+                                                                           client_rx, io_id, &io_notify).await,
             }
 
             if br { break; }
         }
     }
 
-    async fn peer_read_a(kill: &mut ShutdownTx, fr: &mut FrRead) -> bool {
+    async fn peer_read_a(kill: &mut ShutdownTx, kill_rx: &mut ShutdownRx, fr: &mut FrRead) -> bool {
         // Type A code
         // Read lines from server via tcp if we are peer A in the above scenario
 
@@ -94,10 +98,9 @@ impl PeerReader {
                     },
                 }
             }
-/*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
+            _ = kill_rx.recv() => { // exit task if any shutdown received
                 br = true;
             }
-             */
             else => {
                 info!("Peer Server Remote has closed!");
                 if kill.send(SHUTDOWN).is_err() {
@@ -110,7 +113,7 @@ impl PeerReader {
         br
     }
 
-    async fn peer_read_b(kill: &mut ShutdownTx, client_rx: &mut Receiver<PeerMsg>,
+    async fn peer_read_b(kill: &mut ShutdownTx, kill_rx: &mut ShutdownRx, client_rx: &mut Receiver<PeerMsg>,
                          io_id: u16, io_notify: &InputNotifier) -> bool {
         // Type B code
         // Display server received message and as peer B respond as fit
@@ -142,10 +145,9 @@ impl PeerReader {
                     },
                 }
             }
-/*            _ = self.shutdown_rx.recv() => { // exit task if any shutdown received
+            _ = kill_rx.recv() => { // exit task if any shutdown received
                 br = true;
             }
-             */
             else => {
                 info!("No client transmitters, server must have dropped");
                 if kill.send(SHUTDOWN).is_err() {

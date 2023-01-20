@@ -177,6 +177,7 @@ impl InputHandler {
                         // Quit not waiting for the other side to finish
                         if quit {
                             info!("X Terminating tokio input handler task");
+                            sleep(Duration::from_millis(2000)).await;
                             break;
                         }
                     }
