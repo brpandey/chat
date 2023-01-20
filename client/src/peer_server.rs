@@ -46,7 +46,7 @@ impl PeerServerListener {
                         peer_set.spawn_peer_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
 
                         let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
-                        handler.spawn().await;
+                        handler.spawn();
                     }
                     _ = shutdown_rx.recv() => {
                         info!("Peer server received shutdown, returning!");

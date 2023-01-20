@@ -59,12 +59,12 @@ impl PeerServerRequestHandler {
         }
     }
 
-    pub async fn spawn(&mut self) {
+    pub fn spawn(&mut self) {
         let mut r = self.reader.take().unwrap();
         let mut w = self.writer.take().unwrap();
 
         // Spawn tokio task to handle server socket reads from clients
-        let read = tokio::spawn(async move {
+        let _read = tokio::spawn(async move {
             r.handle_read().await;
         });
 
@@ -72,10 +72,6 @@ impl PeerServerRequestHandler {
         let _write = tokio::spawn(async move {
             w.handle_write().await;
         });
-
-        //exit once server read is finished, e.g. client has left
-        read.await.unwrap();
-//        write.await.unwrap();
     }
 }
 
