@@ -5,7 +5,7 @@ use tokio::sync::broadcast::{Sender as BSender, Receiver as BReceiver};
 use tokio_util::codec::{FramedRead};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 
-use tracing::{info, debug, error};
+use tracing::{debug, error};
 
 use protocol::{ChatCodec, ChatMsg, Reply};
 use crate::types::{PeerMsg, InputMsg};
@@ -58,8 +58,6 @@ impl PeerReader {
         let mut peer_name: Option<String> = None;
 
         loop {
-            debug!("task A: listening to peer server replies...");
-
             match &mut self.read {
                 ReadHandle::A(ref mut fr) => br = Self::peer_read_a(&mut self.kill, &mut self.kill_rx, fr).await,
                 ReadHandle::B(ref mut client_rx) => br = Self::peer_read_b(&mut self.kill, &mut self.kill_rx,
@@ -82,7 +80,7 @@ impl PeerReader {
         select! {
             peer_data = async {
                 let msg_a = fr.next().await?;
-                info!("received Y tcp peer server value is {:?}", msg_a);
+                debug!("received Y tcp peer server value is {:?}", msg_a);
 
                 match msg_a {
                     Ok(ChatMsg::PeerB(Reply::Leave(msg))) => { // peer B has left, terminate this peer
@@ -96,7 +94,8 @@ impl PeerReader {
                         println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
                     },
                     Ok(ChatMsg::PeerB(Reply::Note(msg))) => {
-                        println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
+                        let m = std::str::from_utf8(&msg).unwrap_or_default().trim_end();
+                        println!("P> {}", m);
                     },
                     Ok(_) => unimplemented!(),
                     Err(x) => {
@@ -108,7 +107,7 @@ impl PeerReader {
                 Some(())
             } => {
                 if peer_data.is_none() { // if input handler has received a terminate
-                    info!("Peer Server Remote has closed!");
+                    debug!("Peer Server Remote has closed!");
                     if kill.send(SHUTDOWN).is_err() {
                         error!("Unable to send shutdown");
                     }
@@ -132,7 +131,7 @@ impl PeerReader {
 
         select! {
             Some(msg_b) = client_rx.recv() => {
-                info!("received X local channel peer server value is {:?}", msg_b);
+                debug!("received X local channel peer server value is {:?}", msg_b);
 
                 match msg_b {
                     // if peer A wants to leave then terminate this peer 
@@ -151,11 +150,13 @@ impl PeerReader {
 
                         *peer_name = Some(name);
 
+                        let m = std::str::from_utf8(&msg).unwrap_or_default();
                         println!("< {}, to chat, type: \\sw {} (peer type B), to return to lobby, type: \\sw 0 >",
-                                 std::str::from_utf8(&msg).unwrap_or_default(), session_id(io_id));
+                                 m, session_id(io_id));
                     },
                     PeerMsg::Note(msg) => {
-                        println!("P> {}", std::str::from_utf8(&msg).unwrap_or_default());
+                        let m = std::str::from_utf8(&msg).unwrap_or_default().trim_end();
+                        println!("P> {}", m);
                     },
                 }
             }

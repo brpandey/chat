@@ -9,7 +9,7 @@ use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
 use crate::peer_set::PeerShared;
 
-use tracing::{info, /*debug, */error};
+use tracing::{debug, error};
 
 const SHUTDOWN: u8 = 1;
 const SHUTDOWN_ABORT: u8 = 2;
@@ -39,7 +39,7 @@ impl PeerA {
             .io_register(io_shared).await
             .build();
 
-        info!("New peer A, name: {}, peer_name: {}, io_id: {}, successful tcp connect to peer server {:?}",
+        debug!("New peer A, name: {}, peer_name: {}, io_id: {}, successful tcp connect to peer server {:?}",
               &client.name, &client.peer_name.as_ref().unwrap(), client.io_id, &server);
 
         Ok(client)
@@ -70,7 +70,7 @@ impl PeerB {
             .io_register(io_shared).await
             .build();
 
-        info!("New peer B, name: {} io_id: {}, set up local channel to local peer server",
+        debug!("New peer B, name: {} io_id: {}, set up local channel to local peer server",
               &client.name, client.io_id);
 
         Ok(client)
@@ -132,8 +132,6 @@ impl PeerClient {
         // Use current thread to loop and grab data from command line
         let cmd_line_handle = tokio::spawn(async move {
             loop {
-                info!("task peer cmd line read: input looping");
-
                 select! {
                     input = async {
                         let req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
@@ -146,13 +144,11 @@ impl PeerClient {
                         Ok::<_, io::Error>(())
                     } => {
                         if input.is_err() { // if input handler has received a terminate
-                            info!("sending shutdown msg C");
                             shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");
                             return
                         }
                     }
                     _ = shutdown_rx.recv() => { // exit task if shutdown received
-                        info!("shutdown received!");
                         return
                     }
                 }
@@ -186,17 +182,16 @@ impl PeerClient {
             peer_shared.remove(&pn).await;
         }
 
-        info!("Peer client exiting!");
+        debug!("Peer client Exiting!");
     }
 
     pub fn parse_input(name: &str, line: String) -> Option<Ask> {
         match line.as_str() {
             "\\leave" | "\\quit" => {
-                info!("Private session ended by user {}", name);
+                debug!("Private session ended by user {}", name);
                 return Some(Ask::Leave(name.as_bytes().to_vec()));
             },
             l => {
-                info!("not a peerclient command message");
                 // if no commands, split up user input
                 let mut out = vec![];
                 out.push(format!("<{}> ", name).into_bytes());

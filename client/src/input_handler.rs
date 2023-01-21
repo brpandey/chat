@@ -2,7 +2,7 @@ use std::{io as stdio, io::BufRead, thread, time};
 use tokio::{select, time::sleep, time::Duration};
 use tokio::sync::mpsc::{self, Sender as MSender, Receiver as MReceiver};
 use tokio::sync::watch::{self, Sender as WSender, Receiver as WReceiver};
-use tracing::info;
+use tracing::{debug, error};
 
 pub type InputNotifier = MSender<InputMsg>;
 pub type InputReceiver = WReceiver<(u16, u16)>;
@@ -49,7 +49,7 @@ impl InputHandler {
     fn handle_input(line: String, cmd_tx: &MSender<InputCmd>) -> bool {
         let mut quit = false;
 
-        info!("Received a new line: {:?}", &line);
+        debug!("Received a new line: {:?}", &line);
 
         // handles terminal input switching
         match line.as_str() {
@@ -57,19 +57,17 @@ impl InputHandler {
                 cmd_tx.blocking_send(InputCmd::Switch(IO_ID_LOBBY)).unwrap();
             },
             "\\sessions" | "\\ss" => {
-                info!("Sessions request...");
                 cmd_tx.blocking_send(InputCmd::Sessions).unwrap();
             },
             value if value.starts_with("\\switch") || value.starts_with("\\sw") => {
                 if let Some(id_str) = value.splitn(3, ' ').skip(1).take(1).next() {
                     let switch_id_str = id_str.to_owned(); // &str to String
                     let switch_id = io_id(switch_id_str.parse::<u16>().unwrap_or_default()); // String to u16
-                    info!("Attempting to switch input to {}", &switch_id);
                     cmd_tx.blocking_send(InputCmd::Switch(switch_id)).unwrap();
                 }
             },
             "\\quit" => {
-                info!("Input handler received quit.. aborting but passing on first");
+                debug!("Input handler received quit.. aborting but passing on first");
                 quit = true;
                 cmd_tx.blocking_send(InputCmd::Quit).unwrap();
             },
@@ -100,8 +98,8 @@ impl InputHandler {
 
             for line in lines.map(|l| l.unwrap()) {
                 if Self::handle_input(line, &cmd_tx) {
-                    info!("Received quit, terminating input thread");
                     thread::sleep(time::Duration::from_millis(500));
+                    debug!("Received quit, terminating input thread");
                     break;
                 }
             }
@@ -114,26 +112,23 @@ impl InputHandler {
             loop {
                 select!(
                     Some(cmd) = cmd_rx.recv(), if !quit => {
-                        info!("Received a new cmd: {:?}", &cmd);
+                        debug!("Received a new line or cmd: {:?}", &cmd);
 
                         match cmd {
                             InputCmd::Sessions => {
-                                info!("!! Sessions request...");
                                 shared.display_sessions(current_id).await;
                                 continue;  // don't forward the sessions msg on
                             },
                             InputCmd::Switch(switch_id) => {
                                 if shared.switch_id(switch_id).await {
-                                    info!("!! Successful id and line switch, old id {} new id {}", current_id, switch_id);
                                     // swap out old current id and line and replace with new
                                     current_id = switch_id;
                                 } else { // if switch_id not valid ignore and continue
-                                    info!("!! not a valid switch id");
+                                    error!("User specified an invalid switch id");
                                 }
                                 continue; // don't forward switch message
                             },
                             InputCmd::Quit => {
-                                info!("!! 1 Input handler received quit.. aborting but passing on first");
                                 shared.switch_line(QUIT_STR.to_owned()).await;
                                 Self::watch_send(&mut seq_no, current_id, &cmd, &watch_tx).await;
 
@@ -156,7 +151,7 @@ impl InputHandler {
                         Self::watch_send(&mut seq_no, current_id, &cmd, &watch_tx).await;
                     }
                     Some(msg) = msg_rx.recv() => {
-                        info!("Received a new input msg: {:?}", &msg);
+                        debug!("Received a new input msg: {:?}", &msg);
 
                         match msg {
                             InputMsg::NewSession(id, name) => {
@@ -179,8 +174,8 @@ impl InputHandler {
 
                         // Quit not waiting for the other side to finish
                         if quit {
-                            info!("X Terminating tokio input handler task");
                             sleep(Duration::from_millis(2000)).await;
+                            debug!("terminating tokio input handler task");
                             break;
                         }
                     }
@@ -193,7 +188,7 @@ impl InputHandler {
 
     async fn watch_send(uid: &mut u16, sid: u16, cmd: &InputCmd, tx: &InputSender) {
         *uid += 1;
-        info!("Sending new change uid {}, session_id {} corresponding to cmd {:?}", uid, sid, cmd);
+        debug!("Sending new change uid {}, session_id {} corresponding to cmd {:?}", uid, sid, cmd);
         // notify that a new line has been received (changing seq no) along with the current id
         tx.send((*uid, sid)).expect("Unable to send value on watch channel");
     }

@@ -13,7 +13,7 @@ use crate::peer_client::{PeerA, PeerB};
 
 type PeerNames = Arc<RwLock<HashSet<String>>>;
 
-use tracing::{info, /*error*/};
+use tracing::{debug, /*error*/};
 
 const ABORT_ALL: u8 = 1;
 
@@ -51,7 +51,6 @@ impl PeerShared {
 
     pub fn abort_all(&self) {
         self.abort_tx.send(ABORT_ALL).expect("Unable to send abort_all");
-        info!("sent abort all msg");
     }
 
     /* names methods */
@@ -61,12 +60,10 @@ impl PeerShared {
     }
 
     pub async fn insert(&self, peer_name: String) -> bool {
-        info!("attempt to insert name {:?} into peer_set names", peer_name);
         self.names.write().await.insert(peer_name)
     }
 
     pub async fn remove(&self, peer_name: &str) -> bool {
-        info!("attempt to remove name {:?} from peer_set names", peer_name);
         self.names.write().await.remove(peer_name)
     }
 }
@@ -115,10 +112,10 @@ impl PeerSet {
             return Err(Error::new(ErrorKind::Other, "arc joinset has other active references thus unable to unwrap"))
         };
 
-        info!("clients are {:?}", peer_clients);
+        debug!("clients are {:?}", peer_clients);
 
         while let Some(res) = peer_clients.join_next().await {
-            info!("peer client completed {:?}", res);
+            debug!("peer client completed {:?}", res);
         }
 
         Ok(None) // no more peer clients left and arc has been consumed
@@ -133,7 +130,7 @@ impl PeerSet {
             self.set.as_mut().unwrap().lock().await
                 .spawn(PeerA::spawn_ready(server, client_name, peer_name, io_shared, peer_shared));
         } else {
-            info!("Unable to spawn as peer client {:?} has already been spawned", &client_name);
+            debug!("Unable to spawn as peer client {:?} has already been spawned", &client_name);
         }
     }
 

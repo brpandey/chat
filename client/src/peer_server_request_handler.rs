@@ -5,7 +5,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 use tokio_stream::StreamExt;
 
 use futures::SinkExt;
-use tracing::{info, debug};
+use tracing::{debug};
 
 use crate::types::PeerMsg;
 use protocol::{Ask, ChatCodec, ChatMsg, Reply};
@@ -83,7 +83,7 @@ impl PeerServerReader {
 
         loop {
             if let Some(value) = fr.next().await {
-                info!("Peer server received from tcp_read: {:?}", value);
+                debug!("Peer server received from tcp_read: {:?}", value);
 
                 match value {
                     Ok(ChatMsg::PeerA(Ask::Hello(name))) => {
@@ -128,7 +128,7 @@ impl PeerServerReader {
 
     // process client disconnection event
     async fn process_disconnect(&mut self, name: Vec<u8>) {
-        info!("Process Disconnect - Client connection has closed");
+        debug!("Process Disconnect - Client connection has closed");
         let name_str = std::str::from_utf8(&name).unwrap_or_default();
         let leave_msg = PEER_LEFT.replace("{}", name_str).into_bytes();
 
@@ -150,7 +150,7 @@ impl PeerServerWriter {
             select! {
             // Read from local read channel, data received from tcp client peer a
                 Some(msg_a) = self.local_rx.recv() => {
-                    info!("Peer server A - received in its local msg queue: {:?}", &msg_a);
+                    debug!("Peer server A - received in its local msg queue: {:?}", &msg_a);
 
                     match msg_a {
                         PeerMsg::Hello(_, m) => {
@@ -162,17 +162,15 @@ impl PeerServerWriter {
                     }
                 }
                 Some(msg_b) = self.peer_b_server_rx.recv() => {
-                    info!("Peer server B - received in its local client-server msg queue: {:?}", &msg_b);
+                    debug!("Peer server B - received in its local client-server msg queue: {:?}", &msg_b);
                     // handle messages sent from this local peer b node's cmd line
                     match msg_b {
                         PeerMsg::Leave(m) => { // case where peer b (as opposed to peer a) wants to leave
-                            info!("reply back to client with Leave ");
                             reply = Reply::Leave(m);
                             fw.send(reply).await.expect("Unable to write to server");
                             return
                         },
                         PeerMsg::Note(m) => {
-                            info!("reply back to client with Note ");
                             reply = Reply::Note(m);
                             fw.send(reply).await.expect("Unable to write to server")
                         },
@@ -180,7 +178,6 @@ impl PeerServerWriter {
                     }
                 }
                 else => {
-                    info!("all branches are disabled, exiting");
                     return
                 }
             }

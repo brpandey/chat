@@ -4,7 +4,7 @@ use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::sync::broadcast::{Receiver as BReceiver};
 use tokio_util::codec::{FramedWrite};
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
-use tracing::info;
+use tracing::debug;
 
 use protocol::{Ask, ChatCodec};
 use crate::types::{PeerMsg};
@@ -43,11 +43,11 @@ impl PeerWriter {
                 Some(msg) = self.local_rx.recv() => {
                     match &mut self.write {
                         WriteHandle::A(ref mut fw) => {
-                            info!("handle_peer_write: peer type A {:?}", &msg);
+                            debug!("handle_peer_write: peer type A {:?}", &msg);
                             fw.send(msg).await.expect("Unable to write to tcp server");
                         },
                         WriteHandle::B(ref server_tx) => {
-                            info!("handle_peer_write: peer type B {:?}", &msg);
+                            debug!("handle_peer_write: peer type B {:?}", &msg);
                             match msg {
                                 Ask::Note(m) => {
                                     server_tx.send(PeerMsg::Note(m)).await.expect("Unable to tx");

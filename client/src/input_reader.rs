@@ -1,7 +1,7 @@
 use std::io as stdio;
 use std::io::{stdout, Write};
 use tokio::io::{self, Error, ErrorKind};
-use tracing::info;
+use tracing::{info, debug};
 
 use crate::input_shared::InputShared;
 use crate::input_handler::InputReceiver;
@@ -59,7 +59,7 @@ impl InputReader {
             watch_id = input_rx.borrow().1.clone();
         }
 
-        info!("read_async await ok status: new_line {} seq_id {} watch_id {}", new_line, seq_id, watch_id);
+        debug!("read_async await ok status: new_line {} seq_id {} watch_id {}", new_line, seq_id, watch_id);
 
         if new_line {
             if current_id == watch_id {
@@ -71,12 +71,9 @@ impl InputReader {
                     return Ok(None);
                 }
             } else {
-                info!("current_id {} doesn't match watch_id {} from watch channel", current_id, watch_id);
                 return Ok(None);
             }
         }
-
-        info!("checkpoint B.2 no new line received");
 
         return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
     }

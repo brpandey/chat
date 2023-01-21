@@ -94,10 +94,6 @@ impl InputShared {
 
     async fn display_and_switch_id(&self, switch_id: u16) -> bool {
         let switched = self.switch_id(switch_id).await; // set lock inner value to id
-        {
-            let inner = self.shared.current.read().await;
-            println!("sanity check did we update shared current id? {} {}", inner.0, switch_id);
-        }
 
         if switched {
             if is_lobby(switch_id) {

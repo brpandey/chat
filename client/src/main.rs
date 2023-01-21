@@ -6,7 +6,7 @@ use client::peer_set::PeerSet;
 use client::input_handler::InputHandler;
 
 use tracing_subscriber::fmt;
-use tracing::{Level, info};
+use tracing::{Level, debug};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -30,21 +30,16 @@ async fn main() -> io::Result<()> {
     // if peer clients are finished, and peer set is empty kill input handler
     client_handle.await.unwrap();
 
-    info!("client handle has finished, now waiting on peer set -- join all");
+    debug!("client handle has finished, now waiting on peer set -- join all");
 
     pset.join_all().await.expect("Couldn't join successfully on peer clients set");
 
-    info!("Pset finished joining.  Checking if pset is empty now");
-
     if pset.is_empty().await { // if no peer clients running, kill input handler and terminate
-        info!("pset is empty now so aborting input handle");
         input_task_handle.abort();
         drop(input_thread_handle);
-//    } else { // else wait for peer clients to finish
-//        ih.await.expect("Couldn't join successfully on input task");        
     }
 
-    info!("Main shutting down");
+    println!("Main shutting down");
 
     Ok(())
 }

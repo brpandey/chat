@@ -57,7 +57,7 @@ impl Client {
             self.builder.fw.as_mut().unwrap().send(Request::JoinName(name))
                 .await.expect("Unable to write to server");
         } else {
-            debug!("Unable to retrieve user chat name");
+            error!("Unable to retrieve user chat name");
             return Err(Error::new(ErrorKind::Other, "Unable to retrieve user chat name"));
         }
 
@@ -105,7 +105,7 @@ impl Client {
         // indicate that only existing peer client conversations are now only running if any
         // should the user type \\sessions command
         if let Ok(value) = shutdown_rx2.recv().await {
-            info!("Received shutdown quit, closing lobby {:?}", value);
+            debug!("Received shutdown quit, closing lobby {:?}", value);
             if io_shared.notify(InputMsg::CloseLobby).await.is_err() {
                 error!("unable to send close lobby");
             }
@@ -115,7 +115,7 @@ impl Client {
             // allow peer to peer conversations w/o main server being active
             // however if quit than kill all
             if let SHUTDOWN_QUIT | SHUTDOWN_IO_DOWN = value {
-                info!("Received shutdown quit, aborting peer set");
+                debug!("Received shutdown quit, aborting peer set");
                 peer_shared.abort_all();
             }
         }
@@ -129,7 +129,7 @@ impl Client {
 
         futures::future::join_all(futures).await;
 
-        info!("Client terminating");
+        debug!("Client terminating");
 
         Ok(())
     }
@@ -143,13 +143,11 @@ impl Client {
 
         tokio::spawn(async move {
             loop {
-                debug!("task A: listening to server replies...");
-
                 select! {
                     // Read lines from server
                     server_input = async {
                         let server_msg = fr.next().await?;
-                        debug!("received server value is {:?}", server_msg);
+                        debug!("received main server msg, value is {:?}", server_msg);
 
                         match server_msg {
                             Ok(ChatMsg::Server(Response::UserMessage{id, msg})) => {
@@ -160,8 +158,8 @@ impl Client {
                             },
                             Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, pname, addr})) => {
                                 let peer_name = String::from_utf8(pname).unwrap_or_default();
-                                println!(">>> Forked private session with {} {}", pid, peer_name);
-                                println!(">>> To switch back to main lobby, type: \\sw 0");
+//                                println!(">>> Forked private session with {} {}", pid, peer_name);
+//                                println!(">>> To switch back to main lobby, type: \\sw 0");
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);
@@ -179,14 +177,13 @@ impl Client {
                         Some(())
                     } => {
                         if server_input.is_none() { // if input handler has received a terminate
-                            info!("!!Server Remote has closed, sending shutdown msg A");
+                            debug!("Server Remote has closed");
                             shutdown_tx.send(SHUTDOWN_SERVER).expect("Unable to send shutdown");
                             return
                         }
                     }
                     // exit task if shutdown received
                     _ = shutdown_rx.recv() => {
-                        info!("server_read_handle received shutdown, returning!");
                         return;
                     }
                 };
@@ -207,7 +204,6 @@ impl Client {
                         fw.send(msg).await.expect("Unable to write to server");
                     }
                     _ = shutdown_rx.recv() => {
-                        info!("tcp_write_handle received shutdown, returning!");
                         return;  // exit task if shutdown received
                     }
                 }
@@ -249,13 +245,11 @@ impl Client {
                         Ok::<_, io::Error>(())
                     } => {
                         if input.is_err() { // if input handler has received a terminate
-                            info!("sending shutdown msg C");
                             shutdown_tx.send(SHUTDOWN_IO_DOWN).expect("Unable to send shutdown");
                             return
                         }
                     }
                     _ = shutdown_rx.recv() => {
-                        info!("cmd_line_handle received shutdown, returning!");
                         break; // exit task if shutdown received
                     }
                 }
@@ -266,7 +260,7 @@ impl Client {
     pub fn parse_input(name: &str, line: String, shutdown_tx: &BSender<u8>) -> Option<Request> {
         match line.as_str() {
             "\\quit" => {
-                info!("Session terminated by user...");
+                debug!("Session terminated by user...");
                 shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
                 return Some(Request::Quit)
             },
@@ -277,10 +271,9 @@ impl Client {
                 if let Some(pname_str) = value.splitn(3, ' ').skip(1).take(1).next() {
                     let pname: Vec<u8> = pname_str.as_bytes().to_owned();
                     if name.as_bytes() == pname {
-                        info!("Only able to fork a session with other peers, not current peer!");
+                        info!("Unable to fork a session with self!");
                         return None
                     } else {
-                        info!("Attempting to fork a session with {}", std::str::from_utf8(&pname).unwrap_or_default());
                         return Some(Request::ForkPeer{pname})
 
                     }

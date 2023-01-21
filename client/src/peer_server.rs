@@ -10,7 +10,7 @@ use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
 
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct PeerServerListener;
 
@@ -49,7 +49,7 @@ impl PeerServerListener {
                         handler.spawn();
                     }
                     _ = shutdown_rx.recv() => {
-                        info!("Peer server received shutdown, returning!");
+                        debug!("Peer server received shutdown, returning!");
                         return;
                     }
                 }
