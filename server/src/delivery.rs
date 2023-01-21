@@ -1,13 +1,9 @@
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::Encoder;
-
-use tracing::{debug, error};
 use bytes::BytesMut;
 
-//use tokio_util::codec::FramedWrite;
-//use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
-
+use tracing::{debug, error};
 use protocol::{ChatCodec, Response};
 
 use crate::server_types::Registry;
@@ -67,8 +63,10 @@ impl Delivery {
 
             for (k, (_addr, _name, ws)) in r.iter_mut() {
                 if except_cid == *k { continue } // skip the send to except client id
-                let err = format!("Unable to write to tcp socket {:?}", k); // debug
-                ws.write_all(&v).await.expect(&err);
+
+                if ws.write_all(&v).await.is_err() {
+                    error!("Unable to write to tcp socket corresponding to client id {:?}", k);
+                }
             }
         }
     }
