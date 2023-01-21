@@ -7,7 +7,7 @@ use crate::builder::PeerClientBuilder as Builder;
 use crate::types::{PeerMsg, InputMsg};
 use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
-use crate::peer_set::PeerSetShared;
+use crate::peer_set::PeerShared;
 
 use tracing::{info, /*debug, */error};
 
@@ -18,11 +18,11 @@ pub struct PeerA; // unit struct
 
 impl PeerA {
     pub async fn spawn_ready(server: String, name: String, peer_name: String,
-                             io_shared: InputShared, ps_shared: PeerSetShared) -> () {
+                             io_shared: InputShared, peer_shared: PeerShared) -> () {
         if let Ok(mut client) = PeerA::build(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
-            client.run(io_shared, ps_shared).await;
+            client.run(io_shared, peer_shared).await;
         }
 
         ()
@@ -50,9 +50,9 @@ pub struct PeerB; // unit struct
 
 impl PeerB {
     pub async fn spawn_ready(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
-                             name: String, io_shared: InputShared, ps_shared: PeerSetShared) -> () {
+                             name: String, io_shared: InputShared, peer_shared: PeerShared) -> () {
         if let Ok(mut client) = PeerB::build(client_rx, server_tx, name, &io_shared).await {
-            client.run(io_shared, ps_shared).await;
+            client.run(io_shared, peer_shared).await;
         }
 
         ()
@@ -103,7 +103,7 @@ impl PeerClient {
         self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
     }
 
-    async fn run(&mut self, io_shared: InputShared, mut ps_shared: PeerSetShared) { // mut abort_rx: BReceiver<u8>, remove_tx: Sender<String>) {
+    async fn run(&mut self, io_shared: InputShared, mut peer_shared: PeerShared) { // mut abort_rx: BReceiver<u8>, remove_tx: Sender<String>) {
         // grab builder fields
         let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.builder.take_fields();
         let shutdown_tx2 = shutdown_tx.clone();
@@ -118,8 +118,11 @@ impl PeerClient {
         let mut input_rx = io_shared.get_receiver();
         let (io_notify1, io_notify2) = (io_shared.get_notifier(), io_shared.get_notifier());
 
+        // grab peer shared data
+        let peer_shared2 = peer_shared.clone();
+
         let peer_server_read_handle = tokio::spawn(async move {
-            reader.handle_peer_read(io_id, io_notify1).await;
+            reader.handle_peer_read(io_id, io_notify1, peer_shared2).await
         });
 
         let _peer_write_handle = tokio::spawn(async move {
@@ -156,7 +159,9 @@ impl PeerClient {
             }
         });
 
-        let mut abort_rx = ps_shared.take_abort().unwrap();
+        let mut abort_rx = peer_shared.take_abort().unwrap();
+
+        let peer_name: Option<String>;
 
         loop {
             select! {
@@ -164,7 +169,7 @@ impl PeerClient {
                     shutdown_tx2.send(SHUTDOWN_ABORT).expect("Unable to send shutdown");
                 }
                 _ = shutdown_rx2.recv() => {
-                    peer_server_read_handle.await.unwrap();
+                    peer_name = peer_server_read_handle.await.unwrap();
                     cmd_line_handle.await.unwrap();
                     break;
                 }
@@ -177,8 +182,8 @@ impl PeerClient {
         }
 
         // remove peer name from peer_set
-        if self.peer_name.is_some() {
-            ps_shared.remove(self.peer_name.as_ref().unwrap()).await;
+        if let Some(pn) = self.peer_name.take().or(peer_name) {
+            peer_shared.remove(&pn).await;
         }
 
         info!("Peer client exiting!");

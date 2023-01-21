@@ -11,7 +11,7 @@ use tracing::{info, debug, error};
 use protocol::{ChatMsg, Request, Response};
 
 use crate::builder::ClientBuilder as Builder;
-use crate::peer_set::{PeerSet, PeerSetShared};
+use crate::peer_set::{PeerSet, PeerShared};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::types::InputMsg;
 use crate::input_reader::{session_id, InputReader};
@@ -84,8 +84,10 @@ impl Client {
         })
     }
 
-    pub async fn run(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> io::Result<()> {
-        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone(), peer_set.get_shared());
+    pub async fn run(&mut self, io_shared: InputShared,
+                     mut peer_set: PeerSet) -> io::Result<()> {
+        let peer_shared = peer_set.get_shared();
+        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone(), peer_shared.clone());
         let server_read_handle = self.spawn_read(io_shared.clone(), peer_set.clone());
         let server_write_handle = self.spawn_write();
 
@@ -97,7 +99,7 @@ impl Client {
 
         // start up peer server for clients that connect to this node for peer to peer chat.
         let local_server_handle =
-            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set.clone(), shutdown_rx1);
+            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set, shutdown_rx1);
 
         // If client needs to shut down, close the lobby
         // indicate that only existing peer client conversations are now only running if any
@@ -112,9 +114,9 @@ impl Client {
             // don't automatically kill peers, if active
             // allow peer to peer conversations w/o main server being active
             // however if quit than kill all
-            if value == SHUTDOWN_QUIT || value == SHUTDOWN_IO_DOWN {
+            if let SHUTDOWN_QUIT | SHUTDOWN_IO_DOWN = value {
                 info!("Received shutdown quit, aborting peer set");
-                peer_set.abort_all();
+                peer_shared.abort_all();
             }
         }
 
@@ -127,7 +129,7 @@ impl Client {
 
         futures::future::join_all(futures).await;
 
-        info!("Client terminating: either server was terminated or user terminated by ctrl c'ing or \\quit");
+        info!("Client terminating");
 
         Ok(())
     }
@@ -213,7 +215,7 @@ impl Client {
         })
     }
 
-    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared, ps_shared: PeerSetShared) -> JoinHandle<()> {
+    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared, peer_shared: PeerShared) -> JoinHandle<()> {
         // get self field
         let name = self.name.clone();
 
@@ -230,19 +232,18 @@ impl Client {
             loop {
                 select! {
                     input = async {
-                        let req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
+                        let mut req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
                             .and_then(|l| Client::parse_input(&name, l, &shutdown_tx));
 
-                        if req.is_some() {
-                            if let Some(Request::ForkPeer{ref pname}) = req {
-                                if ps_shared.contains(std::str::from_utf8(&pname).unwrap()).await {
-                                    info!("Unable to fork a duplicate session with same peer!");
-                                } else {
-                                    local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
-                                }
-                            } else {
-                                local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                        if let Some(Request::ForkPeer{ref pname}) = req {
+                            if peer_shared.contains(std::str::from_utf8(&pname).unwrap()).await {
+                                info!("Unable to fork a duplicate session with same peer!");
+                                req = None
                             }
+                        }
+
+                        if req.is_some() {
+                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
                         }
 
                         Ok::<_, io::Error>(())
