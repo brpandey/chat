@@ -1,13 +1,13 @@
 use tokio::io;
 use tokio::select;
 use tokio::sync::mpsc::{Sender, Receiver};
-use tokio::sync::broadcast::{Receiver as BReceiver};
 
 use protocol::Ask;
 use crate::builder::PeerClientBuilder as Builder;
 use crate::types::{PeerMsg, InputMsg};
 use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
+use crate::peer_set::PeerSetShared;
 
 use tracing::{info, /*debug, */error};
 
@@ -18,11 +18,11 @@ pub struct PeerA; // unit struct
 
 impl PeerA {
     pub async fn spawn_ready(server: String, name: String, peer_name: String,
-                             io_shared: InputShared, abort_rx: BReceiver<u8>) -> () {
+                             io_shared: InputShared, ps_shared: PeerSetShared) -> () {
         if let Ok(mut client) = PeerA::build(server, name, peer_name, &io_shared).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
-            client.run(io_shared, abort_rx).await;
+            client.run(io_shared, ps_shared).await;
         }
 
         ()
@@ -33,14 +33,14 @@ impl PeerA {
     pub async fn build(server: String, name: String, peer_name: String,
                        io_shared: &InputShared) -> io::Result<PeerClient> {
 
-        let client = Builder::new(name)
+        let client = Builder::new(name, Some(peer_name))
             .connect(&server).await?
             .channels()
-            .io_register_notify(io_shared, peer_name).await
+            .io_register(io_shared).await
             .build();
 
-        info!("New peer A, name: {} io_id: {}, successful tcp connect to peer server {:?}",
-              &client.name, client.io_id, &server);
+        info!("New peer A, name: {}, peer_name: {}, io_id: {}, successful tcp connect to peer server {:?}",
+              &client.name, &client.peer_name.as_ref().unwrap(), client.io_id, &server);
 
         Ok(client)
     }
@@ -50,9 +50,9 @@ pub struct PeerB; // unit struct
 
 impl PeerB {
     pub async fn spawn_ready(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
-                             name: String, io_shared: InputShared, abort_rx: BReceiver<u8>) -> () {
+                             name: String, io_shared: InputShared, ps_shared: PeerSetShared) -> () {
         if let Ok(mut client) = PeerB::build(client_rx, server_tx, name, &io_shared).await {
-            client.run(io_shared, abort_rx).await;
+            client.run(io_shared, ps_shared).await;
         }
 
         ()
@@ -64,7 +64,7 @@ impl PeerB {
                          name: String, io_shared: &InputShared)
                          -> io::Result<PeerClient> {
 
-        let client = Builder::new(name)
+        let client = Builder::new(name, None)
             .connect_local(client_rx, server_tx)
             .channels()
             .io_register(io_shared).await
@@ -81,15 +81,17 @@ impl PeerB {
 //#[derive(Debug)]
 pub struct PeerClient {
     name: String,
+    peer_name: Option<String>,
     io_id: u16,
     local_tx: Option<Sender<Ask>>,
     builder: Builder,
 }
 
 impl PeerClient {
-    pub fn new(name: String, io_id: u16, local_tx: Option<Sender<Ask>>, builder: Builder) -> Self {
+    pub fn new(name: String, peer_name: Option<String>, io_id: u16, local_tx: Option<Sender<Ask>>, builder: Builder) -> Self {
         Self {
             name,
+            peer_name,
             io_id,
             local_tx,
             builder,
@@ -101,7 +103,7 @@ impl PeerClient {
         self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
     }
 
-    async fn run(&mut self, io_shared: InputShared, mut abort_rx: BReceiver<u8>) {
+    async fn run(&mut self, io_shared: InputShared, mut ps_shared: PeerSetShared) { // mut abort_rx: BReceiver<u8>, remove_tx: Sender<String>) {
         // grab builder fields
         let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.builder.take_fields();
         let shutdown_tx2 = shutdown_tx.clone();
@@ -154,6 +156,8 @@ impl PeerClient {
             }
         });
 
+        let mut abort_rx = ps_shared.take_abort().unwrap();
+
         loop {
             select! {
                 Ok(_) = abort_rx.recv() => {
@@ -170,6 +174,11 @@ impl PeerClient {
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
         if io_notify2.send(InputMsg::CloseSession(io_id)).await.is_err() {
             error!("Unable to send close sesion msg");
+        }
+
+        // remove peer name from peer_set
+        if self.peer_name.is_some() {
+            ps_shared.remove(self.peer_name.as_ref().unwrap()).await;
         }
 
         info!("Peer client exiting!");

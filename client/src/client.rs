@@ -3,6 +3,7 @@ use tokio::io::{self, Error, ErrorKind}; //, AsyncWriteExt}; //, AsyncReadExt};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 use tokio::task::JoinHandle;
+use tokio::sync::broadcast::{Sender as BSender};
 
 //use tracing_subscriber::fmt;
 use tracing::{info, debug, error};
@@ -10,7 +11,7 @@ use tracing::{info, debug, error};
 use protocol::{ChatMsg, Request, Response};
 
 use crate::builder::ClientBuilder as Builder;
-use crate::peer_set::PeerSet;
+use crate::peer_set::{PeerSet, PeerSetShared};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::types::InputMsg;
 use crate::input_reader::{session_id, InputReader};
@@ -84,7 +85,7 @@ impl Client {
     }
 
     pub async fn run(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> io::Result<()> {
-        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone());
+        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone(), peer_set.get_shared());
         let server_read_handle = self.spawn_read(io_shared.clone(), peer_set.clone());
         let server_write_handle = self.spawn_write();
 
@@ -212,7 +213,7 @@ impl Client {
         })
     }
 
-    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared) -> JoinHandle<()> {
+    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared, ps_shared: PeerSetShared) -> JoinHandle<()> {
         // get self field
         let name = self.name.clone();
 
@@ -230,13 +231,18 @@ impl Client {
                 select! {
                     input = async {
                         let req = InputReader::read(io_id, &mut input_rx, &io_shared).await?
-                            .and_then(|m| Client::parse_input(&name, m));
+                            .and_then(|l| Client::parse_input(&name, l, &shutdown_tx));
 
                         if req.is_some() {
-                            if let Some(Request::Quit) = req {
-                                shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
+                            if let Some(Request::ForkPeer{ref pname}) = req {
+                                if ps_shared.contains(std::str::from_utf8(&pname).unwrap()).await {
+                                    info!("Unable to fork a duplicate session with same peer!");
+                                } else {
+                                    local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                                }
+                            } else {
+                                local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
                             }
-                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
                         }
 
                         Ok::<_, io::Error>(())
@@ -256,10 +262,11 @@ impl Client {
         })
     }
 
-    pub fn parse_input(name: &str, line: String) -> Option<Request> {
+    pub fn parse_input(name: &str, line: String, shutdown_tx: &BSender<u8>) -> Option<Request> {
         match line.as_str() {
             "\\quit" => {
                 info!("Session terminated by user...");
+                shutdown_tx.send(SHUTDOWN_QUIT).expect("Unable to send shutdown");
                 return Some(Request::Quit)
             },
             "\\users" => {

@@ -22,6 +22,7 @@ use tracing::{info, error};
 
 pub struct PeerClientBuilder {
     name: Option<String>,
+    peer_name: Option<String>,
     rh: Option<ReadHandle>,
     wh: Option<WriteHandle>,
     reader: Option<PeerReader>,
@@ -34,9 +35,10 @@ pub struct PeerClientBuilder {
 
 // Builder provides a simpler, reusable and pipelined interface when constructing Peer Client structure
 impl PeerClientBuilder {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, peer_name: Option<String>) -> Self {
         Self {
             name: Some(name),
+            peer_name,
             rh: None,
             wh: None,
             reader: None,
@@ -89,16 +91,13 @@ impl PeerClientBuilder {
         self
     }
 
-    // Register new io id and notify
-    pub async fn io_register_notify(mut self, io_shared: &InputShared, peer_name: String) -> Self {
-        self.io_id = io_shared.get_next_id().await;
-        io_shared.notify(InputMsg::NewSession(self.io_id, peer_name)).await.expect("Unable to send input msg");
-        self
-    }
-
-    // Register new io id 
+    // Register new io id and notify if peer name available
     pub async fn io_register(mut self, io_shared: &InputShared) -> Self {
         self.io_id = io_shared.get_next_id().await;
+        if self.peer_name.is_some() {
+            io_shared.notify(InputMsg::NewSession(self.io_id, self.peer_name.as_ref().unwrap().clone())).await
+                .expect("Unable to send input msg");
+        }
         self
     }
 
@@ -106,6 +105,7 @@ impl PeerClientBuilder {
     pub fn build(mut self) -> PeerClient {
         PeerClient::new(
             self.name.take().unwrap(),
+            self.peer_name.take(),
             self.io_id,
             self.local_tx.take(),
             self
