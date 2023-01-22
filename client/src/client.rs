@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 use tokio::sync::broadcast::{Sender as BSender};
 
 //use tracing_subscriber::fmt;
-use tracing::{info, debug, error};
+use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
 
@@ -17,7 +17,7 @@ use crate::types::InputMsg;
 use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
 
-const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\n$ Please input chat name: ";
+const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\nNote: fork and users command require that you are in the lobby session e.g. \\lobby\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
 
 const SHUTDOWN_SERVER: u8 = 1;
@@ -233,7 +233,7 @@ impl Client {
 
                         if let Some(Request::ForkPeer{ref pname}) = req {
                             if peer_shared.contains(std::str::from_utf8(&pname).unwrap()).await {
-                                info!("Unable to fork a duplicate session with same peer!");
+                                println!(">>> Unable to fork a duplicate session with same peer!");
                                 req = None
                             }
                         }
@@ -271,7 +271,7 @@ impl Client {
                 if let Some(pname_str) = value.splitn(3, ' ').skip(1).take(1).next() {
                     let pname: Vec<u8> = pname_str.as_bytes().to_owned();
                     if name.as_bytes() == pname {
-                        info!("Unable to fork a session with self!");
+                        println!(">>> Unable to fork a session with self");
                         return None
                     } else {
                         return Some(Request::ForkPeer{pname})
@@ -283,7 +283,7 @@ impl Client {
             },
             l => {
                 // if no commands, split up user input
-                let msg = InputReader::interleave_newlines(l, vec![]);
+                let msg = InputReader::interleave_newlines(l, None);
                 return Some(Request::Message(msg))
             },
         }

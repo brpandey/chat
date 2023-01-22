@@ -19,7 +19,7 @@ impl PeerServerListener {
                         mut peer_set: PeerSet, mut shutdown_rx: BReceiver<u8>) -> JoinHandle<()> {
 
         tokio::spawn(async move {
-            info!("Client peer server starting {:?}", &addr);
+            debug!("Client peer server starting {:?}", &addr);
 
             let result = TcpListener::bind(addr).await;
 
@@ -34,7 +34,7 @@ impl PeerServerListener {
                     Ok((tcp_socket, addr)) = listen.accept() => {
                         let (tcp_read, tcp_write) = tcp_socket.into_split();
 
-                        info!("Server received new client connection {:?}", &addr);
+                        debug!("Server received new client connection {:?}", &addr);
 
                         // create msg queues between peer client and peer server handler
                         // so they can easily communicate with each other

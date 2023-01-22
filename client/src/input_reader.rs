@@ -78,12 +78,20 @@ impl InputReader {
         return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
     }
 
-    pub fn interleave_newlines(line: &str, mut acc: Vec<Vec<u8>>) -> Vec<u8> {
+    pub fn interleave_newlines(line: &str, header: Option<Vec<u8>>) -> Vec<u8> {
+        let mut acc = vec![];
         let mut v: Vec<u8>;
         let mut citer = line.as_bytes().chunks(USER_LINES);
 
         while let Some(chunk) = citer.next() {
-            v = chunk.to_vec();
+            if header.is_some() {
+                v = header.as_ref().unwrap().clone();
+                let mut c = chunk.to_vec();
+                v.append(&mut c);
+            } else {
+                v = chunk.to_vec();
+            }
+
             v.push(b'\n');
             acc.push(v);
         }

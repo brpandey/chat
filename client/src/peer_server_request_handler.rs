@@ -98,20 +98,20 @@ impl PeerServerReader {
                             .expect("Unable to tx");
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {
-                        self.process_disconnect(name).await;
-                        // send local msg 
+                        self.process_disconnect(name.clone()).await;
+
+                        // send local msg
                         self.local_tx.send(PeerMsg::Leave(vec![])).await // send back peer b server's name
                             .expect("Unable to tx");
 
                         break;
                     },
                     Ok(ChatMsg::PeerA(Ask::Note(msg))) => {
-                        // delegate the broadcast of msg echoing to another block
-                        let split_msg = split_msg(msg);
-
-                        // send msg received from peer a to local peer b node
-                        self.peer_b_client_tx.send(PeerMsg::Note(split_msg.clone())).await
-                            .expect("Unable to tx");
+                        for line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
+                            if line.is_empty() { continue }
+                            self.peer_b_client_tx.send(PeerMsg::Note(line)).await
+                                .expect("Unable to tx");
+                        }
                     },
                     Ok(_) => unimplemented!(),
                     Err(x) => {
@@ -120,7 +120,8 @@ impl PeerServerReader {
                     },
                 }
             } else {
-                self.process_disconnect(vec![]).await;
+                self.process_disconnect("current".as_bytes().to_vec()).await;
+//                self.process_disconnect(self.name.clone().into_bytes()).await;
                 break;
             }
         }
@@ -128,8 +129,8 @@ impl PeerServerReader {
 
     // process client disconnection event
     async fn process_disconnect(&mut self, name: Vec<u8>) {
-        debug!("Process Disconnect - Client connection has closed");
         let name_str = std::str::from_utf8(&name).unwrap_or_default();
+        debug!("Process Disconnect - Client connection connected to {:?} has closed", &name_str);
         let leave_msg = PEER_LEFT.replace("{}", name_str).into_bytes();
 
         // signal to peer b client that peer a has left
@@ -183,14 +184,4 @@ impl PeerServerWriter {
             }
         }
     }
-}
-
-pub fn split_msg(msg: Vec<u8>) -> Vec<u8> {
-    let mut output: Vec<u8> = vec![];
-    for mut line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
-        if line.is_empty() { continue }
-        output.append(&mut line);
-    }
-
-    output
 }

@@ -18,7 +18,7 @@ use crate::peer_client_reader::{ReadHandle, PeerReader};
 use crate::peer_client_writer::{WriteHandle, PeerWriter};
 use crate::input_shared::InputShared;
 
-use tracing::{info, error};
+use tracing::{/*info,*/ debug, error};
 
 pub struct PeerClientBuilder {
     name: Option<String>,
@@ -148,7 +148,7 @@ impl ClientBuilder {
 
     // Connect to remote server
     pub async fn connect(mut self, server: &str) -> io::Result<Self> {
-        info!("Client starting, connecting to server {:?}", server);
+        debug!("Client starting, connecting to server {:?}", server);
 
         let client = TcpStream::connect(server).await
             .map_err(|e| { error!("Unable to connect to server"); e })?;

@@ -188,14 +188,14 @@ impl PeerClient {
     pub fn parse_input(name: &str, line: String) -> Option<Ask> {
         match line.as_str() {
             "\\leave" | "\\quit" => {
-                debug!("Private session ended by user {}", name);
+                println!("Private session ended by {}", name);
                 return Some(Ask::Leave(name.as_bytes().to_vec()));
             },
             l => {
                 // if no commands, split up user input
-                let mut out = vec![];
-                out.push(format!("<{}> ", name).into_bytes());
-                let msg = InputReader::interleave_newlines(l, out);
+//                let mut header = vec![];
+                let header = format!("<{}> ", name).into_bytes();
+                let msg = InputReader::interleave_newlines(l, Some(header));
                 return Some(Ask::Note(msg))
             },
         }

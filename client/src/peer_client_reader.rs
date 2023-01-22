@@ -19,6 +19,7 @@ type ShutdownRx = BReceiver<u8>;
 
 const SHUTDOWN: u8 = 1;
 const PEER_HELLO: &str = "Peer {} is ready to chat";
+const PEER_LEFT: &str = "Peer {} has left";
 
 //  A is peer client type, B is peer server type
 #[derive(Debug)]
@@ -84,7 +85,9 @@ impl PeerReader {
 
                 match msg_a {
                     Ok(ChatMsg::PeerB(Reply::Leave(msg))) => { // peer B has left, terminate this peer
-                        println!("< Session terminated as peer {} has left>", std::str::from_utf8(&msg).unwrap_or_default());
+                        let pname = std::str::from_utf8(&msg).unwrap_or_default();
+                        let leave_msg = PEER_LEFT.replace("{}", &pname);
+                        println!("< Session terminated, {} >", leave_msg);
                         kill.send(SHUTDOWN).expect("Unable to send shutdown");
                         br = true;
                     },
@@ -94,8 +97,12 @@ impl PeerReader {
                         println!("< {} >", std::str::from_utf8(&hello_msg).unwrap_or_default());
                     },
                     Ok(ChatMsg::PeerB(Reply::Note(msg))) => {
-                        let m = std::str::from_utf8(&msg).unwrap_or_default().trim_end();
-                        println!("P> {}", m);
+                        for line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
+                            let l = std::str::from_utf8(&line).unwrap_or_default();
+                            if l.is_empty() { continue }
+                            println!("PA> {}", l);
+                        }
+
                     },
                     Ok(_) => unimplemented!(),
                     Err(x) => {
@@ -134,9 +141,10 @@ impl PeerReader {
                 debug!("received X local channel peer server value is {:?}", msg_b);
 
                 match msg_b {
-                    // if peer A wants to leave then terminate this peer 
-                    PeerMsg::Leave(name) => {
-                        println!("< Session terminated as peer {} has left>", std::str::from_utf8(&name).unwrap_or_default());
+                    // if peer B wants to leave then terminate this peer 
+                    PeerMsg::Leave(msg) => {
+                        let msg_str = std::str::from_utf8(&msg).unwrap_or_default();
+                        println!("< Session terminated, {} >", msg_str);
                         kill.send(SHUTDOWN).expect("Unable to send shutdown");
                         br = true;
                     },
@@ -156,7 +164,7 @@ impl PeerReader {
                     },
                     PeerMsg::Note(msg) => {
                         let m = std::str::from_utf8(&msg).unwrap_or_default().trim_end();
-                        println!("P> {}", m);
+                        println!("PB> {}", m);
                     },
                 }
             }
