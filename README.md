@@ -48,7 +48,22 @@ Chat session - End
 </p>
 
 
-Also,
+Chat session - Multiple forks and multiple peer sessions
+
+* Notice ---> Here A (anna) -> B (bobby) -> C (carmen) -> A (anna)
+
+* anna can privately communicate with both bobby and carmen
+
+* bobby can privately communicate with both anna and carmen
+
+* carmen can privately communicate with both anna and bobby
+
+<p float="left">
+  <img src='images/chat3.png' width='845' height='450'/> 
+</p>
+
+
+Lastly,
 
 * PA> means peer session in A mode (e.g. current user initiated it, e.g. sent the \fork)
 
