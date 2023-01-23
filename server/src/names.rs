@@ -1,3 +1,6 @@
+//! Provides management for unique names
+//! Handles names collisions to a point ;)
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::ops::Deref;

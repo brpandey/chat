@@ -1,3 +1,6 @@
+//! Builder to simplify client (regular client and peer client) construct
+//! Provides routines to grab values for future e.g. shutdown handles
+
 use tokio::io;
 use tokio::sync::{broadcast};
 use tokio::sync::mpsc::{self, Sender, Receiver};

@@ -1,3 +1,7 @@
+//! Provides an ability to track peer clients that are spawned or are shutdown
+//! Prevents duplicate sessions with the same peers
+//! Provides for clean shutdown
+
 use std::sync::Arc;
 use std::collections::HashSet;
 

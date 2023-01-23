@@ -1,3 +1,8 @@
+//! Main client that connects to main rendezvous server
+//! *Performs client registration with main server
+//! *Spawns peer clients if user specifies fork cmd
+//! *If Main server terminates, client subsequently terminates leaving any active peer sessions untouched
+
 use tokio::select;
 use tokio::io::{self, Error, ErrorKind}; //, AsyncWriteExt}; //, AsyncReadExt};
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
@@ -5,11 +10,9 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tokio::task::JoinHandle;
 use tokio::sync::broadcast::{Sender as BSender};
 
-//use tracing_subscriber::fmt;
 use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
-
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::{PeerSet, PeerShared};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
@@ -158,8 +161,6 @@ impl Client {
                             },
                             Ok(ChatMsg::Server(Response::ForkPeerAckA{pid, pname, addr})) => {
                                 let peer_name = String::from_utf8(pname).unwrap_or_default();
-//                                println!(">>> Forked private session with {} {}", pid, peer_name);
-//                                println!(">>> To switch back to main lobby, type: \\sw 0");
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);
@@ -257,6 +258,7 @@ impl Client {
         })
     }
 
+    // Parses client specific commands and user text retrieved from input handler
     pub fn parse_input(name: &str, line: String, shutdown_tx: &BSender<u8>) -> Option<Request> {
         match line.as_str() {
             "\\quit" => {

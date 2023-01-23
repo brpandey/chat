@@ -1,3 +1,9 @@
+//! Main client abstraction to handle the input processing arm of peer client sessions
+//! Distinguishes between peer clients that initiates peer sessions A
+//! And receive peer client requests given to peer servers
+
+//! Peer type A's communicate via tcp, whereas peer type B's use a local message channel back to peer server
+
 use tokio::io;
 use tokio::select;
 use tokio::sync::mpsc::{Sender, Receiver};
@@ -103,7 +109,7 @@ impl PeerClient {
         self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
     }
 
-    async fn run(&mut self, io_shared: InputShared, mut peer_shared: PeerShared) { // mut abort_rx: BReceiver<u8>, remove_tx: Sender<String>) {
+    async fn run(&mut self, io_shared: InputShared, mut peer_shared: PeerShared) {
         // grab builder fields
         let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.builder.take_fields();
         let shutdown_tx2 = shutdown_tx.clone();
@@ -177,7 +183,7 @@ impl PeerClient {
             error!("Unable to send close sesion msg");
         }
 
-        // remove peer name from peer_set
+        // remove peer name from peer_set using a valid peer_name
         if let Some(pn) = self.peer_name.take().or(peer_name) {
             peer_shared.remove(&pn).await;
         }
@@ -185,6 +191,7 @@ impl PeerClient {
         debug!("Peer client Exiting!");
     }
 
+    // Handles peer client commands and peer text input
     pub fn parse_input(name: &str, line: String) -> Option<Ask> {
         match line.as_str() {
             "\\leave" | "\\quit" => {
@@ -192,8 +199,6 @@ impl PeerClient {
                 return Some(Ask::Leave(name.as_bytes().to_vec()));
             },
             l => {
-                // if no commands, split up user input
-//                let mut header = vec![];
                 let header = format!("<{}> ", name).into_bytes();
                 let msg = InputReader::interleave_newlines(l, Some(header));
                 return Some(Ask::Note(msg))

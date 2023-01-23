@@ -1,3 +1,7 @@
+//! Shared abstraction to help manage io active session information
+//! Creating new io_id values, displaying and changing the current active io_id value,
+//! Removing io_id information, along with managing active current line data
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;

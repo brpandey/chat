@@ -1,3 +1,8 @@
+//! Peer server request handler abstraction
+//! that in conjunction with the peer_client handles and funnels
+//! requests to the local peer client b or
+//! from the local peer client b back to the initiating peer client a
+
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{self, Sender, Receiver};
@@ -94,7 +99,7 @@ impl PeerServerReader {
                                             .expect("Unable to tx");
                         // send response msg back to peer a with peer b's name
                         self.local_tx.send(PeerMsg::Hello(String::new(),
-                                                              self.name.clone().into_bytes())).await // send back peer b server's name
+                                                          self.name.clone().into_bytes())).await // send back peer b server's name
                             .expect("Unable to tx");
                     },
                     Ok(ChatMsg::PeerA(Ask::Leave(name))) => {

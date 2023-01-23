@@ -1,3 +1,13 @@
+//! Abstraction for input consumers to read stdin data
+//! relevant to each specific consumer io_id.
+
+//! For a given client or peer client, handles the locking check
+//! if a new line event is suited for the client and returns the new line
+
+//! Provides convenience functions to read stdin both blocking and non-blocking
+//! With helpers around translating io_ids to session_ids and
+//! interleaving in newlines for multi-line input
+
 use std::io as stdio;
 use std::io::{stdout, Write};
 use tokio::io::{self, Error, ErrorKind};

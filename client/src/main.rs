@@ -6,7 +6,7 @@ use client::peer_set::PeerSet;
 use client::input_handler::InputHandler;
 
 use tracing_subscriber::fmt;
-use tracing::{Level, debug};
+use tracing::{Level /*, debug*/};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -18,8 +18,10 @@ async fn main() -> io::Result<()> {
         .init(); // set as default subscriber
 
     let input = InputHandler::new();
-    let mut pset = PeerSet::new();
 
+    // Notice that client and peer set are different abstractions and can occur
+    // independent of each other
+    let mut pset = PeerSet::new();
     let client_handle = Client::spawn(input.get_shared(), pset.clone());
 
     thread::sleep(Duration::from_millis(4000));
@@ -30,8 +32,7 @@ async fn main() -> io::Result<()> {
     // if peer clients are finished, and peer set is empty kill input handler
     client_handle.await.unwrap();
 
-    debug!("client handle has finished, now waiting on peer set -- join all");
-
+    // Wait until peer set tasks have finished if any are outstanding
     pset.join_all().await.expect("Couldn't join successfully on peer clients set");
 
     if pset.is_empty().await { // if no peer clients running, kill input handler and terminate

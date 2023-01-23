@@ -1,3 +1,14 @@
+//! Provides central place to handle standard input cmd line reads
+//! Notifies other tokio tasks through a watch channel two things
+//! 1) when a new line is received
+//! 2) what io_id / session_id is current subscribed to reading input
+//!
+//! The input handler defines control messages to view and change the current io session info
+//! Clients and peer clients are able to communicate through msg passing to notify of
+//! auto switching to certain default sessions e.g. lobby or a new peer session
+
+//! Works in conjunction with input shared and input reader
+
 use std::{io as stdio, io::BufRead, thread, time};
 use tokio::{select, time::sleep, time::Duration};
 use tokio::sync::mpsc::{self, Sender as MSender, Receiver as MReceiver};
@@ -46,6 +57,8 @@ impl InputHandler {
         self.shared.clone()
     }
 
+    // convert user text cmds into channel msgs that are sent from
+    // an input thread to a tokio task
     fn handle_input(line: String, cmd_tx: &MSender<InputCmd>) -> bool {
         let mut quit = false;
 
@@ -79,7 +92,7 @@ impl InputHandler {
         quit
     }
 
-    // spawn thread and tokio task
+    // spawn both input thread and tokio cmd handler task
     pub fn spawn(mut input: InputHandler) -> (std::thread::JoinHandle<()>, tokio::task::JoinHandle<()>) {
         let shared = input.shared.clone();
         let watch_tx = input.watch_tx.take().unwrap();
@@ -186,6 +199,7 @@ impl InputHandler {
         (thread_handle, task_handle)
     }
 
+    // helper function to send on watch channel notifying input consumers (client and peer clients)
     async fn watch_send(uid: &mut u16, sid: u16, cmd: &InputCmd, tx: &InputSender) {
         *uid += 1;
         debug!("Sending new change uid {}, session_id {} corresponding to cmd {:?}", uid, sid, cmd);

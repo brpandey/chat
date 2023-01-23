@@ -1,3 +1,10 @@
+//! Implements main rendezvous server request processing dispatching with
+//! mix of responses related to notifications and user messages
+//! Provides client registry functionality used
+//! in determining unique ids, unique names, and socket addr info
+
+//! Broadcasts client messages to other connect clients
+
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::sync::Arc;

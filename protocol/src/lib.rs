@@ -1,3 +1,10 @@
+//! Provides toy protocol implementation for chat server
+//! Handling both client/server communication and peer to peer communication
+
+//! Provides frame defintions
+//! Provides framed implementation assuming full frame can be parsed
+//! (okay for toy protocol for now but for production must guarantee that bytes have been buffered)
+
 #![allow(dead_code)]  // just temporary
 
 use tokio_util::codec::{Encoder, Decoder};
@@ -7,6 +14,9 @@ use std::str;
 
 // encode and decode bypasses traditional libraries
 // like serde or message pack
+
+
+// Message Frames, Subframes, and Subfields
 
 //use tracing::info;
 const REQ: u8 = b'+';

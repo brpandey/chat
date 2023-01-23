@@ -1,3 +1,7 @@
+//! Write abstraction for peer message writes given both peer types A and B
+//! If peer type A write to tcp write socket,
+//! if peer type B write to local peer client channel connected to peer server B
+
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Sender, Receiver};

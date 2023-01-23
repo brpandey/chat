@@ -1,3 +1,7 @@
+//! Read abstraction for peer messages retrieval given both peer types A and B
+//! If peer type A read from tcp read socket,
+//! If peer type B read from local peer client channel connected to peer server B
+
 use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Receiver};
@@ -50,9 +54,11 @@ impl PeerReader {
         // In peer to peer mode, we have peer A and peer B,
         // peer A talks to peer B by sending a TCP message to B and B listens for messages
         // since peer A initiates the p2p session with peer B, it is the client in this instance
-        // and B the peer server, though as a server B also can type cmd line messages!
+        // and B the peer server, though as a server B also can type cmd line messages through peer client B.
 
-        // select! read from server or if we are server (peer B), read from client_rx (peer A)
+        // peer client B communicates with peer server B through locals channels
+
+        // select! read from server or if we are on server side (peer B), read from client_rx (peer A)
 
         // peer A (client only) --------------->   peer B (client and server) <---------- peer C (client only)
         let mut br;
@@ -149,13 +155,12 @@ impl PeerReader {
                         br = true;
                     },
                     PeerMsg::Hello(name, msg) => {
-                        // since peer type b is create after tcp request name is not provided initially
+                        // since peer type b is created after tcp request, name is not provided initially
                         // hence record name given hello protocol msg
                         io_notify.send(InputMsg::UpdatedSessionName(io_id, name.clone()))
                             .await.expect("Unable to send close sesion msg");
 
                         peer_shared.insert(name.clone()).await;
-
                         *peer_name = Some(name);
 
                         let m = std::str::from_utf8(&msg).unwrap_or_default();
