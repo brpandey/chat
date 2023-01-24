@@ -33,7 +33,7 @@ async fn main() -> io::Result<()> {
     client_handle.await.unwrap();
 
     // Wait until peer set tasks have finished if any are outstanding
-    pset.join_all().await.expect("Couldn't join successfully on peer clients set");
+    pset.join_all().await.expect("Unable to join on peer clients set");
 
     if pset.is_empty().await { // if no peer clients running, kill input handler and terminate
         input_task_handle.abort();

@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{Sender, Receiver};
 
 use protocol::Ask;
 use crate::builder::PeerClientBuilder as Builder;
-use crate::types::{PeerMsg, InputMsg};
+use crate::types::{PeerMsg, InputMsg, ReaderError};
 use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
 use crate::peer_set::PeerShared;
@@ -106,7 +106,7 @@ impl PeerClient {
 
     async fn send_hello(&mut self) {
         let msg = Ask::Hello(self.name.clone().into_bytes());
-        self.local_tx.as_mut().unwrap().send(msg).await.expect("xxx Unable to tx");
+        self.local_tx.as_mut().unwrap().send(msg).await.expect("Unable to tx");
     }
 
     async fn run(&mut self, io_shared: InputShared, mut peer_shared: PeerShared) {
@@ -144,10 +144,10 @@ impl PeerClient {
                             .and_then(|m| PeerClient::parse_input(&name, m));
 
                         if req.is_some() {
-                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                            local_tx.send(req.unwrap()).await.expect("Unable to tx");
                         }
 
-                        Ok::<_, io::Error>(())
+                        Ok::<_, ReaderError>(())
                     } => {
                         if input.is_err() { // if input handler has received a terminate
                             shutdown_tx.send(SHUTDOWN).expect("Unable to send shutdown");

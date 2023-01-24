@@ -10,12 +10,13 @@
 
 use std::io as stdio;
 use std::io::{stdout, Write};
-use tokio::io::{self, Error, ErrorKind};
+use tokio::io;
 use tracing::{info, debug};
 
 use crate::input_shared::InputShared;
 use crate::input_handler::InputReceiver;
 use crate::input_handler::IO_ID_LOBBY;
+use crate::types::ReaderError;
 
 pub const IO_ID_OFFSET: u16 = IO_ID_LOBBY;
 const USER_LINES: usize = 64;
@@ -48,7 +49,7 @@ impl InputReader {
 
         print!("{} ", prompt);
         stdout().flush()?;  // Since stdout is line buffered need to explicitly flush
-        stdio::stdin().read_line(&mut buf).expect("unable to read command line input");
+        stdio::stdin().read_line(&mut buf)?;
         let name = buf.trim_end().as_bytes().to_owned();
 
         Ok(Some(name))
@@ -57,7 +58,7 @@ impl InputReader {
     pub async fn read(current_id: u16,
                       input_rx: &mut InputReceiver,
                       io_shared: &InputShared)
-                      -> io::Result<Option<String>> {
+                      -> Result<Option<String>, ReaderError> {
         let new_line: bool;
         let watch_id: u16;
         let seq_id: u16;
@@ -85,7 +86,7 @@ impl InputReader {
             }
         }
 
-        return Err(Error::new(ErrorKind::Other, "no new lines as input_tx has been dropped"));
+        return Err(ReaderError::NoNewLines)
     }
 
     pub fn interleave_newlines(line: &str, header: Option<Vec<u8>>) -> Vec<u8> {

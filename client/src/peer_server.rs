@@ -8,8 +8,6 @@ use tokio::task::JoinHandle;
 use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio::sync::mpsc;
 
-use std::io::ErrorKind;
-
 use crate::peer_set::PeerSet;
 use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::types::PeerMsg;
@@ -28,7 +26,8 @@ impl PeerServerListener {
 
             let result = TcpListener::bind(addr).await;
 
-            if result.is_err() && result.as_ref().unwrap_err().kind() == ErrorKind::AddrInUse {
+            if result.is_err() && result.as_ref().unwrap_err().kind() ==
+                std::io::ErrorKind::AddrInUse {
                 info!("Peer server address already in use, can not have more than 1 peer client on the same machine");
                 return;
             }

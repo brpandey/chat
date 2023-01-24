@@ -4,7 +4,7 @@
 //! *If Main server terminates, client subsequently terminates leaving any active peer sessions untouched
 
 use tokio::select;
-use tokio::io::{self, Error, ErrorKind}; //, AsyncWriteExt}; //, AsyncReadExt};
+use tokio::io::{self}; 
 use tokio_stream::StreamExt; // provides combinator methods like next on to of FramedRead buf read and Stream trait
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 use tokio::task::JoinHandle;
@@ -16,7 +16,7 @@ use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::{PeerSet, PeerShared};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::types::InputMsg;
+use crate::types::{InputMsg, ClientError, ReaderError};
 use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
 
@@ -55,23 +55,25 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn register(&mut self) -> io::Result<()> {
-        if let Ok(Some(name)) = InputReader::blocking_read(GREETINGS) {
+    pub async fn register(&mut self) -> Result<(), ClientError> {
+        let wrapped = InputReader::blocking_read(GREETINGS)
+            .map_err(|e| ClientError::ChatNameInputError(e))?;
+
+        if let Some(name) = wrapped {
             self.builder.fw.as_mut().unwrap().send(Request::JoinName(name))
                 .await.expect("Unable to write to server");
-        } else {
-            error!("Unable to retrieve user chat name");
-            return Err(Error::new(ErrorKind::Other, "Unable to retrieve user chat name"));
         }
 
-        if let Some(Ok(ChatMsg::Server(Response::JoinNameAck{id, name}))) = self.builder.fr.as_mut().unwrap().next().await {
+        let response = self.builder.fr.as_mut().unwrap().next().await
+            .ok_or(ClientError::MissingServerJoinHandshake)?
+            .map_err(|_| ClientError::MissingServerJoinHandshake)?;
+
+        if let ChatMsg::Server(Response::JoinNameAck{id, name}) = response {
             println!(">>> Registered as name: {}, switch id is {}",
                      std::str::from_utf8(&name).unwrap(), session_id(self.io_id));
 
             self.name = String::from_utf8(name).unwrap_or_default();
             self.id = id;
-        } else {
-            return Err(Error::new(ErrorKind::Other, "Didn't receive JoinNameAck"));
         }
 
         Ok(())
@@ -80,7 +82,7 @@ impl Client {
     pub fn spawn(io_shared: InputShared, peer_set: PeerSet) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Ok(mut c) = Client::build(&io_shared).await {
-                if c.register().await.is_ok() {
+                if c.register().await.map_err(|e| {error!("{}", e); e}).is_ok() {
                     c.run(io_shared, peer_set).await.expect("client terminated with an error");
                 }
             }
@@ -240,10 +242,10 @@ impl Client {
                         }
 
                         if req.is_some() {
-                            local_tx.send(req.unwrap()).await.expect("xxx Unable to tx");
+                            local_tx.send(req.unwrap()).await.expect("Unable to tx");
                         }
 
-                        Ok::<_, io::Error>(())
+                        Ok::<_, ReaderError>(())
                     } => {
                         if input.is_err() { // if input handler has received a terminate
                             shutdown_tx.send(SHUTDOWN_IO_DOWN).expect("Unable to send shutdown");

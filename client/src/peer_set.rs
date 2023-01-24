@@ -5,13 +5,12 @@
 use std::sync::Arc;
 use std::collections::HashSet;
 
-use tokio::io::{self, Error, ErrorKind};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::sync::broadcast::{self, Sender as BSender, Receiver as BReceiver};
 
-use crate::types::PeerMsg;
+use crate::types::{PeerMsg, PeerSetError};
 use crate::input_shared::InputShared;
 use crate::peer_client::{PeerA, PeerB};
 
@@ -104,17 +103,11 @@ impl PeerSet {
         self.shared.as_mut().unwrap().clone()
     }
 
-    pub async fn join_all(&mut self) -> io::Result<Option<()>> {
+    pub async fn join_all(&mut self) -> Result<Option<()>, PeerSetError> {
         // consume arc and lock
         let set = self.set.take().unwrap();
-        let try_arc = Arc::try_unwrap(set); // remove Arc layer
-
-        let mut peer_clients = if try_arc.is_ok() {
-            let lock = try_arc.unwrap();
-            lock.into_inner() // with Arc layer removed, consume Mutex lock returning inner data
-        } else {
-            return Err(Error::new(ErrorKind::Other, "arc joinset has other active references thus unable to unwrap"))
-        };
+        let lock = Arc::try_unwrap(set).map_err(|_| PeerSetError::ArcUnwrapError)?; // remove Arc layer
+        let mut peer_clients = lock.into_inner();
 
         debug!("clients are {:?}", peer_clients);
 
@@ -140,9 +133,7 @@ impl PeerSet {
 
     pub async fn spawn_peer_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
                               name: String, io_shared: InputShared) {
-        // since no peer name provided unable to store such peer name
-        // could have a scenario where peer a and peer b have two duplicate sessions
-        // e.g. peer a connects to peer b, and peer b connects to peer a -- unlikely but possible
+        // since no peer name provided, unable to store but updated later
         let peer_shared = self.get_shared();
         self.set.as_mut().unwrap().lock().await
             .spawn(PeerB::spawn_ready(client_rx, server_tx, name, io_shared, peer_shared));
