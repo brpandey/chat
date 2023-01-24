@@ -52,11 +52,11 @@ Chat session - Multiple forks and multiple peer sessions
 
 * Notice ---> A (anna) -> B (bobby) -> C (carmen) -> A (anna)
 
-* anna can privately chat with either bobby and carmen
+* anna can privately chat with either bobby or carmen
 
-* bobby can privately chat with either anna and carmen
+* bobby can privately chat with either anna or carmen
 
-* carmen can privately chat with either anna and bobby
+* carmen can privately chat with either anna or bobby
 
 <p float="left">
   <img src='images/chat3.png' width='845' height='450'/> 
