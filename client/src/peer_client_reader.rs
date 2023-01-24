@@ -106,7 +106,7 @@ impl PeerReader {
                         for line in msg.split(|e| *e == b'\n').map(|l| l.to_owned()) {
                             let l = std::str::from_utf8(&line).unwrap_or_default();
                             if l.is_empty() { continue }
-                            println!("PA> {}", l);
+                            println!("P-> {}", l);
                         }
 
                     },
@@ -169,7 +169,7 @@ impl PeerReader {
                     },
                     PeerMsg::Note(msg) => {
                         let m = std::str::from_utf8(&msg).unwrap_or_default().trim_end();
-                        println!("PB> {}", m);
+                        println!("P~> {}", m);
                     },
                 }
             }
