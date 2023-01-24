@@ -1,7 +1,7 @@
 //! Peer server request handler abstraction
-//! that in conjunction with the peer_client handles and funnels
+//! which in conjunction with the peer_client, handles/funnels
 //! requests to the local peer client b or
-//! from the local peer client b back to the initiating peer client a
+//! from the local peer client b back to the initiating peer client a via tcp session
 
 use tokio::select;
 use tokio::net::tcp;

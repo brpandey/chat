@@ -1,7 +1,7 @@
 //! Peer server accepts new tcp requests for new peer sessions from initiating peer clients (A)
-//! Peer server is connected with a new peer client via message channels upon new request handling
+//! Peer server is connected with a new peer client type B via message channels upon new request handling
 //! Subsequent newly spawned peer clients b allow an exisiting user to dynamically speak to interested
-//! peers in a 1-to-1 non-broadcast manner
+//! peers in a 1-to-1 non-broadcast manner via tcp session
 
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;

@@ -1,6 +1,6 @@
 //! Read abstraction for peer messages retrieval given both peer types A and B
 //! If peer type A read from tcp read socket,
-//! If peer type B read from local peer client channel connected to peer server B
+//! If peer type B read from local peer client channel connected to peer server
 
 use tokio::select;
 use tokio::net::tcp;

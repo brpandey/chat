@@ -1,4 +1,5 @@
-//! Main client abstraction to handle the input processing arm of peer client sessions
+//! Main client abstraction to handle running peer client, functionality for reading and writing is offloaded
+//! to other modules but are spawned within peer client run umbrella task
 //! Distinguishes between peer clients that initiates peer sessions A
 //! And receive peer client requests given to peer servers
 
