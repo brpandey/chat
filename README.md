@@ -50,13 +50,13 @@ Chat session - End
 
 Chat session - Multiple forks and multiple peer sessions
 
-* Notice ---> Here A (anna) -> B (bobby) -> C (carmen) -> A (anna)
+* Notice ---> A (anna) -> B (bobby) -> C (carmen) -> A (anna)
 
-* anna can privately communicate with both bobby and carmen
+* anna can privately chat with either bobby and carmen
 
-* bobby can privately communicate with both anna and carmen
+* bobby can privately chat with either anna and carmen
 
-* carmen can privately communicate with both anna and bobby
+* carmen can privately chat with either anna and bobby
 
 <p float="left">
   <img src='images/chat3.png' width='845' height='450'/> 
@@ -65,9 +65,9 @@ Chat session - Multiple forks and multiple peer sessions
 
 Lastly,
 
-* PA> means peer session in A mode (e.g. current user initiated it, e.g. sent the \fork)
+* P-> means peer session in A mode (e.g. current user initiated it, e.g. sent the \fork)
 
-* PB> means peer session in B mode (e.g. current user received a peer session request from its local peer server)
+* P~> means peer session in B mode (e.g. current user received a peer session request from its local peer server)
 
 * When \fork-ing, can't fork again to same peer name with an already active session! Can't also self fork!
 
