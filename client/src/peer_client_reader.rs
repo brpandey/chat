@@ -164,7 +164,7 @@ impl PeerReader {
                         *peer_name = Some(name);
 
                         let m = std::str::from_utf8(&msg).unwrap_or_default();
-                        println!("< {}, to chat, do \\sw {}, to go to lobby, do \\lob >",
+                        println!("< {}, to chat with: \\sw {}, for lobby: \\lob >",
                                  m, session_id(io_id));
                     },
                     PeerMsg::Note(msg) => {

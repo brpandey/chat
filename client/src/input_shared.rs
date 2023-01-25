@@ -103,7 +103,7 @@ impl InputShared {
             if is_lobby(switch_id) {
                 println!(">>> Auto switched back to main lobby {}", session_id(switch_id));
             } else {
-                println!(">>> Auto switched to session {}, to switch back to main lobby, type: \\sw 0", session_id(switch_id));
+                println!(">>> Auto switched to session {}, for lobby do: \\lob", session_id(switch_id));
             }
         }
 
