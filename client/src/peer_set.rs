@@ -7,12 +7,10 @@ use std::collections::HashSet;
 
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
-use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::sync::broadcast::{self, Sender as BSender, Receiver as BReceiver};
 
-use crate::types::{PeerMsg, PeerSetError};
-use crate::input_shared::InputShared;
-use crate::peer_client::{PeerA, PeerB};
+use crate::types::{PeerSetError};
+use crate::peer_client::Peer;
 
 type PeerNames = Arc<RwLock<HashSet<String>>>;
 
@@ -57,7 +55,6 @@ impl PeerShared {
     }
 
     /* names methods */
-
     pub async fn contains(&self, peer_name: &str) -> bool {
         self.names.read().await.contains(peer_name)
     }
@@ -99,8 +96,8 @@ impl PeerSet {
         }
     }
 
-    pub fn get_shared(&mut self) -> PeerShared {
-        self.shared.as_mut().unwrap().clone()
+    pub fn get_shared(&self) -> PeerShared {
+        self.shared.as_ref().unwrap().clone()
     }
 
     pub async fn join_all(&mut self) -> Result<Option<()>, PeerSetError> {
@@ -118,24 +115,28 @@ impl PeerSet {
         Ok(None) // no more peer clients left and arc has been consumed
     }
 
-    pub async fn spawn_peer_a(&mut self, server: String, client_name: String, peer_name: String, io_shared: InputShared) {
-        // only spawn if peer client name is new (only for type a)
-        // avoid case where a node has more than 1 initiated session to the same peer name
-        // e.g. avoids case where peer a forks two sessions to the same peer b
-        let peer_shared = self.get_shared();
-        if peer_shared.insert(peer_name.clone()).await {
-            self.set.as_mut().unwrap().lock().await
-                .spawn(PeerA::spawn_ready(server, client_name, peer_name, io_shared, peer_shared));
-        } else {
-            debug!("Unable to spawn as peer client {:?} has already been spawned", &client_name);
-        }
-    }
+    // Spawn either peer type a or peer type b,
+    // checking if peer_name (p.2) has already been seen
+    pub async fn spawn(&self, peer: Peer) {
+        let sh = self.get_shared();
+        let spawn;
 
-    pub async fn spawn_peer_b(&mut self, client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
-                              name: String, io_shared: InputShared) {
-        // since no peer name provided, unable to store but updated later
-        let peer_shared = self.get_shared();
-        self.set.as_mut().unwrap().lock().await
-            .spawn(PeerB::spawn_ready(client_rx, server_tx, name, io_shared, peer_shared));
+        match peer {
+            // only spawn if peer client name is new (only for type a)
+            // avoid case where a node has more than 1 initiated session to the same peer name
+            // e.g. avoids case where peer a forks two sessions to the same peer b
+            Peer::PA(ref p) => {
+                spawn = sh.insert(p.2.clone()).await;
+                if !spawn {
+                    debug!("Unable to spawn as peer client {:?} has already been spawned", &p.1);
+                }
+            },
+            // since no peer name provided, unable to store but updated later from peer client
+            Peer::PB(_) => spawn = true,
+        }
+
+        if spawn {
+            self.set.as_ref().unwrap().lock().await.spawn(peer.spawn_ready(sh));
+        }
     }
 }

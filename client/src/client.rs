@@ -15,6 +15,7 @@ use tracing::{/*info,*/ debug, error};
 use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
 use crate::peer_set::{PeerSet, PeerShared};
+use crate::peer_client::{Peer, PeerA};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::types::{InputMsg, ClientError, ReaderError};
 use crate::input_reader::{session_id, InputReader};
@@ -90,7 +91,7 @@ impl Client {
     }
 
     pub async fn run(&mut self, io_shared: InputShared,
-                     mut peer_set: PeerSet) -> io::Result<()> {
+                     peer_set: PeerSet) -> io::Result<()> {
         let peer_shared = peer_set.get_shared();
         let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone(), peer_shared.clone());
         let server_read_handle = self.spawn_read(io_shared.clone(), peer_set.clone());
@@ -139,7 +140,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn spawn_read(&mut self, io_shared: InputShared, mut peer_set: PeerSet) -> JoinHandle<()> {
+    pub fn spawn_read(&mut self, io_shared: InputShared, peer_set: PeerSet) -> JoinHandle<()> {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
 
@@ -166,7 +167,8 @@ impl Client {
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);
-                                peer_set.spawn_peer_a(addr_str, client_name.clone(), peer_name, io_shared.clone()).await;
+                                let a = PeerA(addr_str, client_name.clone(), peer_name, io_shared.clone());
+                                peer_set.spawn(Peer::PA(a)).await;
                             },
                             Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                                 println!(">>> Unable to fork into private session as peer {} unavailable",

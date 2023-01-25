@@ -8,7 +8,8 @@ use tokio::task::JoinHandle;
 use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio::sync::mpsc;
 
-use crate::peer_set::PeerSet;
+use crate::peer_set::{PeerSet};
+use crate::peer_client::{Peer, PeerB};
 use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::types::PeerMsg;
 use crate::input_shared::InputShared;
@@ -19,7 +20,7 @@ pub struct PeerServerListener;
 
 impl PeerServerListener {
     pub fn spawn_accept(addr: String, name: String, io_shared: InputShared,
-                        mut peer_set: PeerSet, mut shutdown_rx: BReceiver<u8>) -> JoinHandle<()> {
+                        peer_set: PeerSet, mut shutdown_rx: BReceiver<u8>) -> JoinHandle<()> {
 
         tokio::spawn(async move {
             debug!("Client peer server starting {:?}", &addr);
@@ -47,7 +48,8 @@ impl PeerServerListener {
 
                         // For each new peer that wants to connect with this node e.g. N1
                         // spawn a separate peer client of type B that locally communicates with peer server
-                        peer_set.spawn_peer_b(client_rx, server_tx, name.clone(), io_shared.clone()).await;
+                        let b = PeerB(client_rx, server_tx, name.clone(), io_shared.clone());
+                        peer_set.spawn(Peer::PB(b)).await;
 
                         let mut handler = PeerServerRequestHandler::new(tcp_read, tcp_write, client_tx, server_rx, name.clone());
                         handler.spawn();

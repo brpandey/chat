@@ -21,7 +21,23 @@ use tracing::{debug, error};
 const SHUTDOWN: u8 = 1;
 const SHUTDOWN_ABORT: u8 = 2;
 
-pub struct PeerA; // unit struct
+pub struct PeerA(pub String, pub String, pub String, pub InputShared); // server, client_name, peer_name, io_shared,
+pub struct PeerB(pub Receiver<PeerMsg>, pub Sender<PeerMsg>, pub String, pub InputShared); // client_rx, server_tx, name, io_shared
+
+pub enum Peer {
+    PA(PeerA),
+    PB(PeerB),
+}
+
+impl Peer {
+    // Note we consume self here
+    pub async fn spawn_ready(self, ps: PeerShared) -> () {
+        match self {
+            Peer::PA(p) => PeerA::spawn_ready(p.0, p.1, p.2, p.3, ps).await,
+            Peer::PB(p) => PeerB::spawn_ready(p.0, p.1, p.2, p.3, ps).await,
+        }
+    }
+}
 
 impl PeerA {
     pub async fn spawn_ready(server: String, name: String, peer_name: String,
@@ -52,8 +68,6 @@ impl PeerA {
         Ok(client)
     }
 }
-
-pub struct PeerB; // unit struct
 
 impl PeerB {
     pub async fn spawn_ready(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
