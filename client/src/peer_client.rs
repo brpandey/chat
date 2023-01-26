@@ -20,8 +20,6 @@ use tracing::{debug, error};
 const SHUTDOWN: u8 = 1;
 const SHUTDOWN_ABORT: u8 = 2;
 
-
-
 //#[derive(Debug)]
 pub struct PeerClient {
     pub(crate) name: String,
@@ -114,14 +112,11 @@ impl PeerClient {
 
         // remove peer name from peer_set using a valid peer_name
         let pname = self.peer_name.take().or(peer_name).unwrap(); // {
-//            peer_shared.remove(&pn).await;
-//        }
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session
         if eb.notify(EventMsg::CloseSession(io_id, pname)).is_err() {
             error!("Unable to send close sesion msg");
         }
-
 
         debug!("Peer client Exiting!");
     }
