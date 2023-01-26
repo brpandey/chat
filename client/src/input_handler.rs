@@ -38,23 +38,29 @@ pub struct InputHandler {
     shared: InputShared,
     watch_tx: Option<InputSender>,
     msg_rx: Option<MReceiver<InputMsg>>,
+    msg_tx: MSender<InputMsg>,
 }
 
 impl InputHandler {
     pub fn new() -> Self {
         let (msg_tx, msg_rx) = mpsc::channel::<InputMsg>(16);
         let (watch_tx, watch_rx) = watch::channel((0, 0)); // Watch channel has 1 tx and potentially multiple receivers
-        let shared = InputShared::new(IO_ID_LOBBY, watch_rx, msg_tx);
+        let shared = InputShared::new(IO_ID_LOBBY, watch_rx);
 
         Self {
             shared,
             watch_tx: Some(watch_tx),
             msg_rx: Some(msg_rx),
+            msg_tx,
         }
     }
 
     pub fn get_shared(&self) -> InputShared {
         self.shared.clone()
+    }
+
+    pub fn get_notifier(&self) -> InputNotifier {
+        self.msg_tx.clone()
     }
 
     // convert user text cmds into channel msgs that are sent from
@@ -213,5 +219,3 @@ impl InputHandler {
         tx.send((*uid, sid)).expect("Unable to send value on watch channel");
     }
 }
-
-

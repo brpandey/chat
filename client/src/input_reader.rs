@@ -95,6 +95,7 @@ impl InputReader {
         let mut citer = line.as_bytes().chunks(USER_LINES);
 
         while let Some(chunk) = citer.next() {
+            // if header specified, prepend to chunked line
             if header.is_some() {
                 v = header.as_ref().unwrap().clone();
                 let mut c = chunk.to_vec();
@@ -103,7 +104,7 @@ impl InputReader {
                 v = chunk.to_vec();
             }
 
-            v.push(b'\n');
+            v.push(b'\n'); // interleave the chunked line
             acc.push(v);
         }
 

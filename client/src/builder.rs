@@ -15,11 +15,12 @@ type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
 use protocol::{Request, Ask, ChatCodec};
 
 use crate::client::Client;
-use crate::types::{PeerMsg, InputMsg};
+use crate::types::{PeerMsg, EventMsg};
 use crate::peer_client::PeerClient;
 use crate::peer_client_reader::{ReadHandle, PeerReader};
 use crate::peer_client_writer::{WriteHandle, PeerWriter};
 use crate::input_shared::InputShared;
+use crate::event_bus::EventBus;
 
 use tracing::{/*info,*/ debug, error};
 
@@ -95,11 +96,11 @@ impl PeerClientBuilder {
     }
 
     // Register new io id and notify if peer name available
-    pub async fn io_register(mut self, io_shared: &InputShared) -> Self {
+    pub async fn io_register(mut self, io_shared: &InputShared, eb: &EventBus) -> Self {
         self.io_id = io_shared.get_next_id().await;
         if self.peer_name.is_some() {
-            io_shared.notify(InputMsg::NewSession(self.io_id, self.peer_name.as_ref().unwrap().clone())).await
-                .expect("Unable to send input msg");
+            eb.notify(EventMsg::NewSession(self.io_id, self.peer_name.as_ref().unwrap().clone()))
+                .expect("Unable to send event msg");
         }
         self
     }

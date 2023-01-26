@@ -6,15 +6,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::error::TrySendError;
 //use tracing::info;
 
-use crate::types::InputMsg;
 use crate::input_reader::{session_id, is_lobby, lobby_id};
 
-pub type InputNotifier = crate::input_handler::InputNotifier;
 type InputReceiver = crate::input_handler::InputReceiver;
-
 type IdLinePair = RwLock<(u16, String)>; // contains the io id along with the current line
 type Sessions = RwLock<HashMap<u16, String>>;
 
@@ -22,7 +18,6 @@ pub struct InputBase {
     current: IdLinePair,
     sessions: Sessions,
     rx: InputReceiver,
-    tx: InputNotifier,
     counter: AtomicU16,
 }
 
@@ -31,7 +26,7 @@ pub struct InputShared {
 }
 
 impl InputShared {
-    pub fn new(seed_id: u16, rx: InputReceiver, tx: InputNotifier) -> Self {
+    pub fn new(seed_id: u16, rx: InputReceiver) -> Self {
         let current = RwLock::new((seed_id, String::from("empty")));
         let sessions = RwLock::new(HashMap::from([(seed_id, String::from("main lobby"))]));
         let counter = AtomicU16::new(seed_id);
@@ -42,19 +37,10 @@ impl InputShared {
                     current,
                     sessions,
                     rx,
-                    tx,
                     counter
                 }
             )
         }
-    }
-
-    pub(crate) async fn notify(&self, msg: InputMsg) -> Result<(), TrySendError<InputMsg>> {
-        self.shared.tx.try_send(msg)
-    }
-
-    pub(crate) fn get_notifier(&self) -> InputNotifier {
-        self.shared.tx.clone()
     }
 
     pub(crate) fn get_receiver(&self) -> InputReceiver {

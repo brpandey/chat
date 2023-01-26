@@ -14,12 +14,12 @@ use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
-use crate::peer_set::{PeerSet, PeerShared};
-use crate::peer_client::{Peer, PeerA};
+use crate::peer_set::{PeerNames};
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::types::{InputMsg, ClientError, ReaderError};
+use crate::types::{EventMsg, ClientError, ReaderError, Peer, PeerA};
 use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
+use crate::event_bus::EventBus;
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\nNote: fork and users command require that you are in the lobby session e.g. \\lobby\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
@@ -80,39 +80,38 @@ impl Client {
         Ok(())
     }
 
-    pub fn spawn(io_shared: InputShared, peer_set: PeerSet) -> JoinHandle<()> {
+    pub fn spawn(io_shared: InputShared, names: PeerNames, eb: EventBus) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Ok(mut c) = Client::build(&io_shared).await {
                 if c.register().await.map_err(|e| {error!("{}", e); e}).is_ok() {
-                    c.run(io_shared, peer_set).await.expect("client terminated with an error");
+                    c.run(io_shared, names, eb).await.expect("client terminated with an error");
                 }
             }
         })
     }
 
     pub async fn run(&mut self, io_shared: InputShared,
-                     peer_set: PeerSet) -> io::Result<()> {
-        let peer_shared = peer_set.get_shared();
-        let cmd_line_handle = self.spawn_cmd_line_read(io_shared.clone(), peer_shared.clone());
-        let server_read_handle = self.spawn_read(io_shared.clone(), peer_set.clone());
+                     names: PeerNames, eb: EventBus) -> io::Result<()> {
+        let cmd_line_handle = self.spawn_cmd_line_read(io_shared, names);
+        let server_read_handle = self.spawn_read(eb.clone());
         let server_write_handle = self.spawn_write();
 
         // stagger the local peer server port value
         let addr = format!("{}:{}", PEER_SERVER, PeerServer::peer_port(self.id));
 
+        let (_, mut shutdown_rx) = self.builder.shutdown_handles();
         let (_, shutdown_rx1) = self.builder.shutdown_handles();
-        let (_, mut shutdown_rx2) = self.builder.shutdown_handles();
 
         // start up peer server for clients that connect to this node for peer to peer chat.
         let local_server_handle =
-            PeerServerListener::spawn_accept(addr, self.name.clone(), io_shared.clone(), peer_set, shutdown_rx1);
+            PeerServerListener::spawn_accept(addr, self.name.clone(), shutdown_rx1, eb.clone());
 
         // If client needs to shut down, close the lobby
         // indicate that only existing peer client conversations are now only running if any
         // should the user type \\sessions command
-        if let Ok(value) = shutdown_rx2.recv().await {
+        if let Ok(value) = shutdown_rx.recv().await {
             debug!("Received shutdown quit, closing lobby {:?}", value);
-            if io_shared.notify(InputMsg::CloseLobby).await.is_err() {
+            if eb.notify(EventMsg::CloseLobby).is_err() {
                 error!("unable to send close lobby");
             }
 
@@ -122,7 +121,7 @@ impl Client {
             // however if quit than kill all
             if let SHUTDOWN_QUIT | SHUTDOWN_IO_DOWN = value {
                 debug!("Received shutdown quit, aborting peer set");
-                peer_shared.abort_all();
+                eb.abort_clients();
             }
         }
 
@@ -140,10 +139,9 @@ impl Client {
         Ok(())
     }
 
-    pub fn spawn_read(&mut self, io_shared: InputShared, peer_set: PeerSet) -> JoinHandle<()> {
+    pub fn spawn_read(&mut self, eb: EventBus) -> JoinHandle<()> {
         // Spawn client tcp read tokio task, to read back main server msgs
         let client_name = self.name.clone();
-
         let mut fr = self.builder.take_read();
         let (shutdown_tx, mut shutdown_rx) = self.builder.shutdown_handles();
 
@@ -167,8 +165,8 @@ impl Client {
 
                                 // Spawn tokio task to send client requests to peer server address
                                 let addr_str = PeerServer::stagger_address_port(addr, pid);
-                                let a = PeerA(addr_str, client_name.clone(), peer_name, io_shared.clone());
-                                peer_set.spawn(Peer::PA(a)).await;
+                                let a = PeerA(addr_str, client_name.clone(), peer_name);
+                                eb.notify(EventMsg::Spawn(Peer::PA(a))).expect("Unable to send event msg");
                             },
                             Ok(ChatMsg::Server(Response::PeerUnavailable(name))) => {
                                 println!(">>> Unable to fork into private session as peer {} unavailable",
@@ -216,7 +214,7 @@ impl Client {
         })
     }
 
-    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared, peer_shared: PeerShared) -> JoinHandle<()> {
+    pub fn spawn_cmd_line_read(&mut self, io_shared: InputShared, names: PeerNames) -> JoinHandle<()> {
         // get self field
         let name = self.name.clone();
 
@@ -237,7 +235,7 @@ impl Client {
                             .and_then(|l| Client::parse_input(&name, l, &shutdown_tx));
 
                         if let Some(Request::ForkPeer{ref pname}) = req {
-                            if peer_shared.contains(std::str::from_utf8(&pname).unwrap()).await {
+                            if names.contains(std::str::from_utf8(&pname).unwrap()).await {
                                 println!(">>> Unable to fork a duplicate session with same peer!");
                                 req = None
                             }
