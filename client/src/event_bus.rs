@@ -1,4 +1,6 @@
-//! Allow tasks to message publish and listening without tasks knowing about one another
+//! Provide for notification consolidation so client tasks are decoupled from
+//! specifics of input msg notification or names data coordination
+//! Also allows for client abort handling coordination
 
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -53,10 +55,13 @@ impl EventBus {
         self.abort_rx.take()
     }
 
+    // Send abort message that clients have access to
     pub fn abort_clients(&self) {
         self.abort_tx.send(ABORT_ALL).expect("Unable to send abort_clients");
     }
 
+    // Handle event msgs that allow the clients (producers) decoupling with the "psuedo"
+    // consumer registrations e.g. io_notify, names managment
     pub fn spawn(mut eb: EventBus, io_notify: InputNotifier, io_shared: InputShared,
                  peer_set: PeerSet, names: PeerNames) -> task::JoinHandle<()> {
         let mut event_rx = eb.event_rx.take().unwrap();
