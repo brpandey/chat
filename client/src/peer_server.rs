@@ -8,7 +8,8 @@ use tokio::task::JoinHandle;
 use tokio::sync::broadcast::Receiver as BReceiver;
 use tokio::sync::mpsc;
 
-use crate::types::{PeerMsg, EventMsg, Peer, PeerB};
+use crate::types::{PeerMsg, EventMsg};
+use crate::peer::{Peer, PeerB};
 use crate::peer_server_request_handler::PeerServerRequestHandler;
 use crate::event_bus::EventBus;
 use tracing::{debug, info};

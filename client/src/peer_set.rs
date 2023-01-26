@@ -8,7 +8,8 @@ use std::collections::HashSet;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 
-use crate::types::{PeerSetError, Peer};
+use crate::types::PeerSetError;
+use crate::peer::Peer;
 use crate::input_shared::InputShared;
 use crate::event_bus::EventBus;
 

@@ -14,9 +14,10 @@ use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
 use crate::builder::ClientBuilder as Builder;
-use crate::peer_set::{PeerNames};
+use crate::peer::{Peer, PeerA};
+use crate::peer_set::PeerNames;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
-use crate::types::{EventMsg, ClientError, ReaderError, Peer, PeerA};
+use crate::types::{EventMsg, ClientError, ReaderError};
 use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
 use crate::event_bus::EventBus;

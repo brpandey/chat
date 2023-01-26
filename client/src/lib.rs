@@ -1,6 +1,7 @@
 mod builder;
 pub mod client;
 mod types;
+mod peer;
 mod peer_client;
 mod peer_client_reader;
 mod peer_client_writer;
