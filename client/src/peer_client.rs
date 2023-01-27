@@ -110,7 +110,7 @@ impl PeerClient {
             }
         }
 
-        // remove peer name from peer_set using a valid peer_name
+        // grab peer name whether it was set in the client at the begging or retrieved later
         let pname = self.peer_name.take().or(peer_name).unwrap(); // {
 
         // given read task is finished (e.g. through \leave or disconnect) switch back to lobby session

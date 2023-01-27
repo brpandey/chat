@@ -1,8 +1,10 @@
 //! Abstraction for input consumers to read stdin data
 //! relevant to each specific consumer io_id.
 
-//! For a given client or peer client, handles the locking check
-//! if a new line event is suited for the client and returns the new line
+//! For a given client reader, handles the locking check
+//! if a new line event is suited for the client and returns the new line,
+//! this works in conjunction with the watch channel notifying when a
+//! new line has been produced
 
 //! Provides convenience functions to read stdin both blocking and non-blocking
 //! With helpers around translating io_ids to session_ids and
@@ -11,7 +13,7 @@
 use std::io as stdio;
 use std::io::{stdout, Write};
 use tokio::io;
-use tracing::{info, debug};
+use tracing::{error, debug};
 
 use crate::input_shared::InputShared;
 use crate::input_handler::InputReceiver;
@@ -37,11 +39,9 @@ pub fn io_id(session_id: u16) -> u16 {
     session_id + IO_ID_OFFSET
 }
 
-
 pub struct InputReader;
 
 impl InputReader {
-
     // blocking function to gather user input from std::io::stdin
     // should be called first for name registration
     pub fn blocking_read(prompt: &str) -> io::Result<Option<Vec<u8>>> {
@@ -55,6 +55,9 @@ impl InputReader {
         Ok(Some(name))
     }
 
+    // read uses watch channel to know when to check locked current for new line
+    // watch channel and locking around current are used to coordinate dolling out new lines
+    // to the matching (active) client
     pub async fn read(current_id: u16,
                       input_rx: &mut InputReceiver,
                       io_shared: &InputShared)
@@ -65,7 +68,7 @@ impl InputReader {
 
         {
             // keep borrowed scope small
-            new_line = input_rx.changed().await.is_ok();
+            new_line = input_rx.changed().await.is_ok(); // if watch channel value (line) has changed
             seq_id = input_rx.borrow().0.clone();
             watch_id = input_rx.borrow().1.clone();
         }
@@ -77,10 +80,9 @@ impl InputReader {
                 if let Some(line) = io_shared.get_line_if_id_matches(current_id).await {
                     return Ok(Some(line));
                 }
-                else {
-                    info!("checkpoint A.2 current id didn't match arc current rwlock hence no line to provide");
-                    return Ok(None);
-                }
+
+                error!("Current id didn't match arc current rwlock hence no line to provide");
+                return Ok(None);
             } else {
                 return Ok(None);
             }
@@ -89,6 +91,7 @@ impl InputReader {
         return Err(ReaderError::NoNewLines)
     }
 
+    // inserts newline character into lines and optionally prepending a header text
     pub fn interleave_newlines(line: &str, header: Option<Vec<u8>>) -> Vec<u8> {
         let mut acc = vec![];
         let mut v: Vec<u8>;
