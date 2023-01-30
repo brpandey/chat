@@ -77,26 +77,30 @@ impl EventBus {
                             }
                         }
                         EventMsg::NewSession(id, name) => {
-                            io_notify.try_send(InputMsg::NewSession(id, name))
-                                .expect("Unable to send input msg");
+                            if io_notify.try_send(InputMsg::NewSession(id, name)).is_err() {
+                                error!("Unable to send input new session msg");
+                            }
                         },
                         EventMsg::UpdatedSessionName(id, name) => {
-                            io_notify.try_send(InputMsg::UpdatedSessionName(id, name.clone()))
-                                .expect("Unable to send input msg");
-                            names.insert(name).await;
+                            if io_notify.try_send(InputMsg::UpdatedSessionName(id, name.clone())).is_err() {
+                                error!("Unable to send input update session name msg");
+                            } else {
+                                names.insert(name).await;
+                            }
+
                         },
                         EventMsg::CloseSession(id, name) => {
-                            if io_notify.try_send(InputMsg::CloseSession(id))
-                                .is_err() {
-                                    error!("Unable to send input msg");
-                                }
-                            names.remove(&name).await;
+                            if io_notify.try_send(InputMsg::CloseSession(id)).is_err() {
+                                error!("Unable to send input close session msg");
+                            } else {
+                                names.remove(&name).await;
+                            }
                         },
                         EventMsg::CloseLobby => {
                             pset = None; // disable spawning, drop peer_set reducing arc strong count by 1
 
                             if io_notify.try_send(InputMsg::CloseLobby).is_err() {
-                                error!("Unable to send input msg");
+                                error!("Unable to send input close lobby msg");
                             }
                         }
                     }
