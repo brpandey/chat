@@ -6,7 +6,7 @@ Run cargo run in each window (run multiple windows for multiple clients)
 
 Multi-line supported with simple peer to peer chat supported (no routing or overlay)
 
-Supports two modes: 
+Supports two modes:
 
 * Traditional, clients/server broadcast: broadcast lobby mode, with each client getting a copy of each message
 * Private peer sessions: only the two peers A & B in the peer session see the messages
@@ -32,8 +32,26 @@ Chat session - Begin
 
 * Note rendezvous server is queried for peer client addr info upon a call to \fork
 
+```mermaid
+flowchart TB;
+    B <---> MS
+    A <-.-> MS
+    C <-.-> MS
+    A <--> C
+    subgraph Peer Session
+        A(A)
+        C(C)
+    end
+    subgraph Lobby
+        B(B)
+    end
+    subgraph Main Server
+        MS{{MS}}
+    end
+```
+
 <p float="left">
-  <img src='images/chat1.png' width='845' height='450'/> 
+  <img src='images/chat1.png' width='845' height='450'/>
 </p>
 
 
@@ -41,10 +59,23 @@ Chat session - End
 
 * Notice ---> main server drops out (X Bye Bye X), but active peer sessions untouched (just can't go back to lobby)
 
+```mermaid
+flowchart TB;
+    A <--> C
+    subgraph Peer Session
+        A(A)
+        C(C)
+    end
+    subgraph Exited
+        B(B)
+        MS{{MS}}
+    end
+```
+
 * \ss or \sessions cmd is helpful to see which sessions are active, * means active session
 
 <p float="left">
-  <img src='images/chat2.png' width='845' height='450'/> 
+  <img src='images/chat2.png' width='845' height='450'/>
 </p>
 
 
@@ -58,10 +89,26 @@ Chat session - Multiple forks and multiple peer sessions
 
 * carmen can privately chat with either anna or bobby
 
-<p float="left">
-  <img src='images/chat3.png' width='845' height='450'/> 
-</p>
+```mermaid
+graph LR;
+    A(A) -.- MS{{MS}};
+    B(B) -.- MS{{MS}};
+    C(C) -.- MS{{MS}};
+    A(A) <-- 1 --> B;
+    B(B) <-- 2 --> C;
+    C(C) <-- 3 --> A;
+```
 
+```mermaid
+sequenceDiagram;
+    A->>B: 1 Just forked you bobby-O!;
+    B->>C: 2 Just forked you carmen sandiego!;
+    C->>A: 3 Just forked you anna bo-banana!;
+```
+
+<p float="left">
+  <img src='images/chat3.png' width='845' height='450'/>
+</p>
 
 Lastly,
 
