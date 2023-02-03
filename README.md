@@ -28,15 +28,11 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
 
 Chat session - Begin
 
-* Start with one main/rendezvous server and three clients A, B, C -- corresponding to anna, bobby, carmen
-
-* Note rendezvous server is queried for peer client addr info upon a call to \fork
-
 ```mermaid
 flowchart TB;
-    B <---> MS
-    A <-.-> MS
-    C <-.-> MS
+    B ---> MS
+    A -.-> MS
+    C -.-> MS
     A <--> C
     subgraph Peer Session
         A(A)
@@ -50,14 +46,16 @@ flowchart TB;
     end
 ```
 
+* Start with one main (also rendezvous) server and three clients A, B, C -- corresponding to anna, bobby, carmen
+
+* Main server is queried for peer client addr info upon a call to \fork
+
 <p float="left">
   <img src='images/chat1.png' width='845' height='450'/>
 </p>
 
 
 Chat session - End
-
-* Notice ---> main server drops out (X Bye Bye X), but active peer sessions untouched (just can't go back to lobby)
 
 ```mermaid
 flowchart TB;
@@ -71,8 +69,9 @@ flowchart TB;
         MS{{MS}}
     end
 ```
+* When main server drops out, peer sessions are untouched (just can't go back to lobby)
 
-* \ss or \sessions cmd is helpful to see which sessions are active, * means active session
+* \ss or \sessions cmd shows which sessions are active, * means active session
 
 <p float="left">
   <img src='images/chat2.png' width='845' height='450'/>
@@ -80,8 +79,6 @@ flowchart TB;
 
 
 Chat session - Multiple forks and multiple peer sessions
-
-* Notice ---> A (anna) -> B (bobby) -> C (carmen) -> A (anna)
 
 * anna can privately chat with either bobby or carmen
 
