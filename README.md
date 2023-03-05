@@ -28,23 +28,9 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
 
 Chat session - Begin
 
-```mermaid
-flowchart TB;
-    B ---> MS
-    A -.-> MS
-    C -.-> MS
-    A <--> C
-    subgraph Peer Session
-        A(A)
-        C(C)
-    end
-    subgraph Lobby
-        B(B)
-    end
-    subgraph Main Server
-        MS{{MS}}
-    end
-```
+<p align="center">
+  <img src='images/diagram-chat1.png' width='268' height='343'/>
+</p>
 
 * Start with one main (also rendezvous) server and three clients A, B, C -- corresponding to anna, bobby, carmen
 
@@ -57,18 +43,11 @@ flowchart TB;
 
 Chat session - End
 
-```mermaid
-flowchart TB;
-    A <--> C
-    subgraph Peer Session
-        A(A)
-        C(C)
-    end
-    subgraph Exited
-        B(B)
-        MS{{MS}}
-    end
-```
+<p align="center">
+  <img src='images/diagram-chat2.png' width='316' height='204'/>
+</p>
+
+
 * When main server drops out, peer sessions are untouched (just can't go back to lobby)
 
 * \ss or \sessions cmd shows which sessions are active, * means active session
@@ -86,25 +65,16 @@ Chat session - Multiple forks and multiple peer sessions
 
 * carmen can privately chat with either anna or bobby
 
-```mermaid
-graph LR;
-    A(A) -.- MS{{MS}};
-    B(B) -.- MS{{MS}};
-    C(C) -.- MS{{MS}};
-    A(A) <-- 1 --> B;
-    B(B) <-- 2 --> C;
-    C(C) <-- 3 --> A;
-```
-
-```mermaid
-sequenceDiagram;
-    A->>B: 1 Just forked you bobby-O!;
-    B->>C: 2 Just forked you carmen sandiego!;
-    C->>A: 3 Just forked you anna bo-banana!;
-```
+<p align="center">
+  <img src='images/diagram-chat3.png' width='307' height='150'/>
+</p>
 
 <p float="left">
   <img src='images/chat3.png' width='845' height='450'/>
+</p>
+
+<p align="center">
+  <img src='images/diagram-chat4.png' width='795' height='309'/>
 </p>
 
 Lastly,
