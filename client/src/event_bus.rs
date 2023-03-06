@@ -45,7 +45,6 @@ impl EventBus {
         }
     }
 
-
     pub fn notify(&self, msg: EventMsg) -> Result<(), TrySendError<EventMsg>> {
         self.event_tx.try_send(msg)
     }
@@ -87,7 +86,6 @@ impl EventBus {
                             } else {
                                 names.insert(name).await;
                             }
-
                         },
                         EventMsg::CloseSession(id, name) => {
                             if io_notify.try_send(InputMsg::CloseSession(id)).is_err() {
@@ -97,6 +95,7 @@ impl EventBus {
                             }
                         },
                         EventMsg::CloseLobby => {
+                            drop(pset);
                             pset = None; // disable spawning, drop peer_set reducing arc strong count by 1
 
                             if io_notify.try_send(InputMsg::CloseLobby).is_err() {

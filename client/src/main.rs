@@ -42,6 +42,8 @@ async fn main() -> io::Result<()> {
     // if peer clients are finished, and peer set is empty kill input handler
     client_handle.await.unwrap();
 
+    thread::sleep(Duration::from_millis(1000));
+
     // Wait until peer set tasks have finished if any are outstanding
     pset.join_all().await.expect("Unable to join on peer clients set");
 
@@ -51,7 +53,7 @@ async fn main() -> io::Result<()> {
         drop(input_thread_handle);
     }
 
-    println!("Main shutting down");
+    println!("Terminating...");
 
     Ok(())
 }

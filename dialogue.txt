@@ -1,0 +1,47 @@
+
+anna: \users
+anna: hello friends! how is everyone!?
+
+bobby: hey just getting back from playing tennis! EXHAUSTED
+
+carmen: \fork anna
+carmen: hey anna! just wanted to send you a private message! How is your uncle doing since winning the hot dog eating contest last weekend?! It was fun to watch, but I hope he's feeling better!
+
+anna: \ss
+anna: \sw 1
+oh, uncle henry? nothing troubles his stomach after a few days of rest and mountain dew! -- it's like a natural detoxifier, I tell you!
+
+carmen: OMG -- TOO FUNNY!
+
+bobby: hey guys, I wanted to let you know that I'm hosting movie night at my place next Wednesday!
+
+carmen: \ss
+carmen: \lob
+
+carmen: I would love to attend movie night bobby, count me in!
+anna: \ss
+anna: \sw 0
+
+anna: yes I'll be there too!
+
+bobby:  cool guys!
+
+server: ^C
+
+carmen: \ss
+carmen: \sw 1
+carmen: looks like the main server went down! but we can still chat via peer chat!
+
+anna: \ss
+anna: \sw 1
+anna: oh cool! also, one thing
+anna: i have a free pass to the aquarium, do you want to pick it up this week sometime?
+
+carmen: heck yeah! that's great!
+carmen: yes please!
+
+anna: it's yours then! i gotta run!
+
+carmen: okay TTYL
+
+anna: \quit

@@ -30,21 +30,21 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
     <tr>
         <td style="text-align: center;">
             <img src="images/anna.gif" alt="" />
-            <br /> Anna
+            <br /><a href="https://github.com/brpandey/chat/blob/main/images/anna.gif">Anna</a>
         </td>
         <td style="text-align: center;">
-            <img src="images/main_server.gif" alt="" />
-            <br /> Server
+            <img src="images/server.gif" alt="" />
+            <br /><a href="https://github.com/brpandey/chat/blob/main/images/server.gif">Server</a>
         </td>
     </tr>
     <tr>
         <td style="text-align: center;">
             <img src="images/bobby.gif" alt="" />
-            <br /> Bobby
+            <br /><a href="https://github.com/brpandey/chat/blob/main/images/bobby.gif">Bobby</a>
         </td>
         <td style="text-align: center;">
             <img src="images/carmen.gif" alt="" />
-            <br /> Carmen
+            <br /><a href="https://github.com/brpandey/chat/blob/main/images/carmen.gif">Carmen</a>
         </td>
     </tr>
 </table>
@@ -59,12 +59,6 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
 
 * Main server is queried for peer client addr info upon a call to \fork
 
-<!---
-<p float="left">
-  <img src='images/chat1.png' width='845' height='450'/>
-</p>
- -->
-
 ### Chat session - End
 
 <p align="center">
@@ -75,12 +69,6 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
 * When main server drops out, peer sessions are untouched (just can't go back to lobby)
 
 * \ss or \sessions cmd shows which sessions are active, * means active session
-
-<!---
-<p float="left">
-  <img src='images/chat2.png' width='845' height='450'/>
-</p>
--->
 
 
 ### Chat session - Multiple forks
@@ -93,6 +81,7 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
 
 <p float="left">
   <img src='images/chat3.png' width='845' height='450'/>
+  <br /> <a href="https://github.com/brpandey/chat/blob/main/images/chat3.png">Forks</a>
 </p>
 
 <p align="center">
