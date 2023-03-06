@@ -26,6 +26,29 @@ Note
 lobby is available on startup but after a peer session, do \sw 0 or \lob or \lobby
 ```
 
+<table cellspacing="0" cellpadding="0" border="0">
+    <tr>
+        <td style="text-align: center;">
+            <img src="images/anna.gif" alt="" />
+            <br /> Anna
+        </td>
+        <td style="text-align: center;">
+            <img src="images/main_server.gif" alt="" />
+            <br /> Server
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <img src="images/bobby.gif" alt="" />
+            <br /> Bobby
+        </td>
+        <td style="text-align: center;">
+            <img src="images/carmen.gif" alt="" />
+            <br /> Carmen
+        </td>
+    </tr>
+</table>
+
 Chat session - Begin
 
 <p align="center">
