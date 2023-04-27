@@ -1,4 +1,4 @@
-//! Abstraction to instantiate peer A or B client
+//! Abstraction to construct and run peer A or B client
 use tokio::io;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -35,7 +35,7 @@ impl Peer {
 impl PeerA {
     pub async fn spawn_ready(server: String, name: String, peer_name: String,
                              io_shared: InputShared, eb: EventBus) -> () {
-        if let Ok(mut client) = PeerA::build(server, name, peer_name, &io_shared, &eb).await {
+        if let Ok(mut client) = PeerA::construct(server, name, peer_name, &io_shared, &eb).await {
             // peer A initiates hello since it initiated the session!
             client.send_hello().await;
             client.run(io_shared, eb).await;
@@ -46,7 +46,7 @@ impl PeerA {
 
     // client is peer type A which initiates a reaquest to an already running peer B
     // client type A is not connected to the peer B server other than through tcp
-    pub async fn build(server: String, name: String, peer_name: String, io_shared: &InputShared, eb: &EventBus)
+    pub async fn construct(server: String, name: String, peer_name: String, io_shared: &InputShared, eb: &EventBus)
                        -> io::Result<PeerClient> {
 
         let mut pcb = PeerClientBuilder::new(name, Some(peer_name));
@@ -66,7 +66,7 @@ impl PeerA {
 impl PeerB {
     pub async fn spawn_ready(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>, name: String,
                              io_shared: InputShared, eb: EventBus) -> () {
-        if let Ok(mut client) = PeerB::build(client_rx, server_tx, name, &io_shared, &eb).await {
+        if let Ok(mut client) = PeerB::construct(client_rx, server_tx, name, &io_shared, &eb).await {
             client.run(io_shared, eb).await;
         }
 
@@ -75,7 +75,7 @@ impl PeerB {
 
     // client type B is the interative part of the peer type B server on the same node
     // client type B is connected to the peer type B through channels
-    pub async fn build(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
+    pub async fn construct(client_rx: Receiver<PeerMsg>, server_tx: Sender<PeerMsg>,
                          name: String, io_shared: &InputShared, eb: &EventBus)
                          -> io::Result<PeerClient> {
 

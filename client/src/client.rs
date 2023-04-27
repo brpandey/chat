@@ -14,7 +14,7 @@ use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
 use crate::builder::{Builder, ClientBuilder, ConnectType};
-use crate::peer::{Peer, PeerA};
+use crate::peer_director::{Peer, PeerA};
 use crate::peer_set::PeerNames;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
 use crate::types::{EventMsg, ClientError, ReaderError};
