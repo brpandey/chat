@@ -9,7 +9,7 @@ use tokio::select;
 use tokio::sync::mpsc::{Sender};
 
 use protocol::Ask;
-use crate::builder::PeerClientBuilder as Builder;
+use crate::builder::PeerFields;
 use crate::types::{EventMsg, ReaderError};
 use crate::input_reader::InputReader;
 use crate::input_shared::InputShared;
@@ -26,17 +26,17 @@ pub struct PeerClient {
     pub(crate) peer_name: Option<String>,
     pub(crate) io_id: u16,
     pub(crate) local_tx: Option<Sender<Ask>>,
-    pub(crate) builder: Builder,
+    pub(crate) fields : Option<PeerFields>,
 }
 
 impl PeerClient {
-    pub fn new(name: String, peer_name: Option<String>, io_id: u16, local_tx: Option<Sender<Ask>>, builder: Builder) -> Self {
+    pub fn new(name: String, peer_name: Option<String>, io_id: u16, local_tx: Option<Sender<Ask>>, fields: Option<PeerFields>) -> Self {
         Self {
             name,
             peer_name,
             io_id,
             local_tx,
-            builder,
+            fields,
         }
     }
 
@@ -49,7 +49,7 @@ impl PeerClient {
         let mut input_rx = io_shared.get_receiver();
 
         // grab builder fields
-        let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.builder.take_fields();
+        let (mut reader, mut writer, shutdown_tx, mut shutdown_rx) = self.fields.take().unwrap();
         let shutdown_tx2 = shutdown_tx.clone();
         let mut shutdown_rx2 = shutdown_tx2.subscribe();
 

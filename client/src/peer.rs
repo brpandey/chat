@@ -2,7 +2,7 @@
 use tokio::io;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::builder::PeerClientBuilder as Builder;
+use crate::builder::{Builder, PeerClientBuilder, ConnectType};
 use crate::peer_client::PeerClient;
 use crate::event_bus::EventBus;
 use crate::input_shared::InputShared;
@@ -49,14 +49,15 @@ impl PeerA {
     pub async fn build(server: String, name: String, peer_name: String, io_shared: &InputShared, eb: &EventBus)
                        -> io::Result<PeerClient> {
 
-        let client = Builder::new(name, Some(peer_name))
-            .connect(&server).await?
-            .channels()
-            .io_register(io_shared, eb).await
-            .build();
+        let mut pcb = PeerClientBuilder::new(name, Some(peer_name));
+        pcb.setup_connection(ConnectType::ServerName(server)).await?;
+        pcb.setup_channels();
+        pcb.setup_io(io_shared, Some(eb)).await;
 
-        debug!("New peer A, name: {}, peer_name: {}, io_id: {}, successful tcp connect to peer server {:?}",
-              &client.name, &client.peer_name.as_ref().unwrap(), client.io_id, &server);
+        let client = pcb.build();
+
+        debug!("New peer A, name: {}, peer_name: {}, io_id: {}, successful tcp connect to peer server",
+              &client.name, &client.peer_name.as_ref().unwrap(), client.io_id);
 
         Ok(client)
     }
@@ -78,11 +79,12 @@ impl PeerB {
                          name: String, io_shared: &InputShared, eb: &EventBus)
                          -> io::Result<PeerClient> {
 
-        let client = Builder::new(name, None)
-            .connect_local(client_rx, server_tx)
-            .channels()
-            .io_register(io_shared, eb).await
-            .build();
+        let mut pcb = PeerClientBuilder::new(name, None);
+        pcb.setup_connection(ConnectType::Local(client_rx, server_tx)).await?;
+        pcb.setup_channels();
+        pcb.setup_io(io_shared, Some(eb)).await;
+
+        let client = pcb.build();
 
         debug!("New peer B, name: {} io_id: {}, set up local channel to local peer server",
               &client.name, client.io_id);

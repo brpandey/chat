@@ -13,7 +13,7 @@ use tokio::sync::broadcast::{Sender as BSender};
 use tracing::{/*info,*/ debug, error};
 
 use protocol::{ChatMsg, Request, Response};
-use crate::builder::ClientBuilder as Builder;
+use crate::builder::{Builder, ClientBuilder, ConnectType};
 use crate::peer::{Peer, PeerA};
 use crate::peer_set::PeerNames;
 use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
@@ -33,11 +33,14 @@ pub struct Client {
     id: u16,
     io_id: u16,
     name: String,
-    builder: Builder,
+    builder: ClientBuilder,
 }
 
 impl Client {
-    pub fn new(io_id: u16, builder: Builder) -> Self {
+
+    /*** Associated functions ***/
+
+    pub fn new(io_id: u16, builder: ClientBuilder) -> Self {
         Client {
             id: 0,
             io_id,
@@ -48,14 +51,29 @@ impl Client {
 
     // Utilize builder to construct client target structure
     pub async fn build(io_shared: &InputShared) -> io::Result<Client> {
-        let client = Builder::new()
-            .connect(&MAIN_SERVER).await?
-            .channels()
-            .io_register(io_shared).await
-            .build();
+        let mut cb = ClientBuilder::new();
+        cb.setup_connection(ConnectType::ServerName(MAIN_SERVER.to_string())).await?;
+        cb.setup_channels();
+        cb.setup_io(io_shared, None).await;
+
+        let client = cb.build();
 
         Ok(client)
     }
+
+
+    pub fn spawn(io_shared: InputShared, names: PeerNames, eb: EventBus) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            if let Ok(mut c) = Client::build(&io_shared).await {
+                if c.register().await.map_err(|e| {error!("{}", e); e}).is_ok() {
+                    c.run(io_shared, names, eb).await.expect("client terminated with an error");
+                }
+            }
+        })
+    }
+
+
+    /*** Method defintions ***/
 
     pub async fn register(&mut self) -> Result<(), ClientError> {
         let wrapped = InputReader::blocking_read(GREETINGS)
@@ -81,15 +99,6 @@ impl Client {
         Ok(())
     }
 
-    pub fn spawn(io_shared: InputShared, names: PeerNames, eb: EventBus) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            if let Ok(mut c) = Client::build(&io_shared).await {
-                if c.register().await.map_err(|e| {error!("{}", e); e}).is_ok() {
-                    c.run(io_shared, names, eb).await.expect("client terminated with an error");
-                }
-            }
-        })
-    }
 
     pub async fn run(&mut self, io_shared: InputShared,
                      names: PeerNames, eb: EventBus) -> io::Result<()> {
