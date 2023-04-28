@@ -9,9 +9,9 @@ use tracing::Level;
 
 use server::delivery::Delivery;
 use server::names::NamesShared;
-use server::server_types::{MsgType, Registry};
-use server::server_listener::ServerListener;
-use server::server_channel::ChannelReceiver;
+use server::types::{MsgType, Registry};
+use server::listener::ServerListener;
+use server::channel::ChannelReceiver;
 
 const SERVER: &str = "127.0.0.1:43210";
 const BOUNDED_CHANNEL_SIZE: usize = 64;

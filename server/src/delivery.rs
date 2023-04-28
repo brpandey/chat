@@ -6,7 +6,7 @@ use bytes::BytesMut;
 use tracing::{debug, error};
 use protocol::{ChatCodec, Response};
 
-use crate::server_types::Registry;
+use crate::types::Registry;
 
 const ALL_CLIENTS: u16 = 0;
 

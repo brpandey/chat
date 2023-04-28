@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicU16;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 
-use crate::server_types::{Registry, MsgType};
+use crate::types::{Registry, MsgType};
 use crate::names::NamesShared;
 use crate::request_handler::RequestHandler;
 

@@ -20,7 +20,7 @@ use bytes::BytesMut;
 use tracing::{info, debug, error};
 
 use protocol::{ChatMsg, ChatCodec, Request};
-use crate::server_types::{MsgType, Registry};
+use crate::types::{MsgType, Registry};
 use crate::names::NamesShared;
 
 const USER_JOINED_OTHERS: &str = "User {} joined";

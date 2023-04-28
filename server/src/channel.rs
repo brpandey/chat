@@ -2,7 +2,7 @@ use tokio::sync::mpsc::{Sender, Receiver};
 use tracing::{debug, info};
 use protocol::Response;
 
-use crate::server_types::MsgType;
+use crate::types::MsgType;
 use crate::delivery::Delivery;
 use crate::names::NamesShared;
 
