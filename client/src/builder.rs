@@ -38,6 +38,11 @@ pub trait Builder {
     fn build(self) -> Self::ClientType;
 }
 
+pub enum ConnectType {
+    ServerName(String),
+    Local(Receiver<PeerMsg>, Sender<PeerMsg>)
+}
+
 pub struct PeerClientBuilder {
     name: Option<String>,
     peer_name: Option<String>,
@@ -49,11 +54,6 @@ pub struct PeerClientBuilder {
     shutdown_rx: Option<BReceiver<u8>>,
     local_tx: Option<Sender<Ask>>,
     io_id: u16,
-}
-
-pub enum ConnectType {
-    ServerName(String),
-    Local(Receiver<PeerMsg>, Sender<PeerMsg>)
 }
 
 // Builder provides a simpler, reusable and pipelined interface when constructing Peer Client structure

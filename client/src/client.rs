@@ -61,7 +61,6 @@ impl Client {
         Ok(client)
     }
 
-
     pub fn spawn(io_shared: InputShared, names: PeerNames, eb: EventBus) -> JoinHandle<()> {
         tokio::spawn(async move {
             if let Ok(mut c) = Client::build(&io_shared).await {
@@ -71,7 +70,6 @@ impl Client {
             }
         })
     }
-
 
     /*** Method defintions ***/
 
@@ -98,7 +96,6 @@ impl Client {
 
         Ok(())
     }
-
 
     pub async fn run(&mut self, io_shared: InputShared,
                      names: PeerNames, eb: EventBus) -> io::Result<()> {
