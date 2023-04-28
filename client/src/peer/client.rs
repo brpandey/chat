@@ -6,7 +6,7 @@
 //! Peer type A's communicate via tcp, whereas peer type B's use a local message channel back to peer server
 
 use tokio::select;
-use tokio::sync::mpsc::{Sender};
+use tokio::sync::mpsc::Sender;
 
 use protocol::Ask;
 use crate::builder::PeerFields;

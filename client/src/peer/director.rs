@@ -3,7 +3,7 @@ use tokio::io;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::builder::{Builder, PeerClientBuilder, ConnectType};
-use crate::peer_client::PeerClient;
+use crate::peer::client::PeerClient;
 use crate::event_bus::EventBus;
 use crate::input_shared::InputShared;
 use crate::types::PeerMsg;

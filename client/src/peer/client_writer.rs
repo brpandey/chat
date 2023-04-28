@@ -6,12 +6,12 @@ use tokio::select;
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Sender, Receiver};
 use tokio::sync::broadcast::{Receiver as BReceiver};
-use tokio_util::codec::{FramedWrite};
+use tokio_util::codec::FramedWrite;
 use futures::SinkExt; // provides combinator methods like send/send_all on top of FramedWrite buf write and Sink trait
 use tracing::debug;
 
 use protocol::{Ask, ChatCodec};
-use crate::types::{PeerMsg};
+use crate::types::PeerMsg;
 
 type FrWrite = FramedWrite<tcp::OwnedWriteHalf, ChatCodec>;
 

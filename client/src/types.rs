@@ -1,4 +1,4 @@
-use crate::peer_director::Peer;
+use crate::peer::director::Peer;
 
 pub type InputNotifier = crate::input_handler::InputNotifier;
 

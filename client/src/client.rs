@@ -10,17 +10,19 @@ use futures::SinkExt; // provides combinator methods like send/send_all on top o
 use tokio::task::JoinHandle;
 use tokio::sync::broadcast::{Sender as BSender};
 
-use tracing::{/*info,*/ debug, error};
-
 use protocol::{ChatMsg, Request, Response};
-use crate::builder::{Builder, ClientBuilder, ConnectType};
-use crate::peer_director::{Peer, PeerA};
-use crate::peer_set::PeerNames;
-use crate::peer_server::{PeerServerListener, PEER_SERVER, PeerServer};
+
 use crate::types::{EventMsg, ClientError, ReaderError};
 use crate::input_reader::{session_id, InputReader};
 use crate::input_shared::InputShared;
 use crate::event_bus::EventBus;
+
+use crate::builder::{Builder, ClientBuilder, ConnectType};
+use crate::peer_set::PeerNames;
+use crate::peer::director::{Peer, PeerA};
+use crate::peer::server::{PeerServerListener, PEER_SERVER, PeerServer};
+
+use tracing::{/*info,*/ debug, error};
 
 const GREETINGS: &str = "$ Welcome to chat! \n$ Commands: \\quit, \\users, \\fork chatname, \\switch n, \\sessions\nNote: fork and users command require that you are in the lobby session e.g. \\lobby\n$ Please input chat name: ";
 const MAIN_SERVER: &str = "127.0.0.1:43210";
