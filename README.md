@@ -79,16 +79,13 @@ lobby is available on startup but after a peer session, do \sw 0 or \lob or \lob
   <img src='images/diagram-chat3.png' width='307' height='150'/>
 </p>
 
+
 <p float="left">
   <img src='images/chat3.png' width='845' height='450'/>
   <br /> <a href="https://github.com/brpandey/chat/blob/main/images/chat3.png">Forks</a>
 </p>
 
-<p align="center">
-  <img src='images/diagram-chat4.png' width='795' height='309'/>
-</p>
-
-Lastly,
+Notes:
 
 * P-> means peer session in A mode (e.g. current user initiated it, e.g. sent the \fork)
 
@@ -101,5 +98,22 @@ Lastly,
 * Handles duplicate names somewhat, as names are used as the unique id
 
 * And uses Tokio! tasks, mpsc, watch channels, Mutexes, RwLocks, atomics, composite structs...
+
+
+<p align="center">
+  <img src='images/diagram-chat4.png' width='795' height='309'/>
+</p>
+
+
+<!--
+ [![](https://mermaid.ink/img/pako:eNp9k01v2zAMhv8Ky1MLOEYiJ_0w0BXLBmyXnrJTYWBgbCbxakuGJDfzkvz3yV9D3TjTQYBI-n34ivIBY5UwhrjJ1D7ekbbwYxlJcMuU662mYgefpSSYtcF6rWMy9mecpSztu3DBrPsoTCYTODo9KTk7tinD-o119wHLJJIfOEu1XlcgxkFiFCQug8Rl0BfSOUsIxknBKCm4TArOSIMbgsfHT3CMcGXd7bb5b1qVBTybbQht4LvaQ2qAnVqlJD9dRXiEVZtr92Er_qSRhOvWyk1XtOPKA9cgeV3gV2ks7ElaTsAqMK7HLkNQ6PSNLEPOxtCWfd93gmOzOvckek9LrSipE-G_BoCy7Oo9fk3xK2y0ynsnGVWp3IJlKVPTYBuvZz5nrc-ac12_wRtQu95YKeOMHU7q6qmTOJ9Iu68OET5TKvtjUxHhqSeuajMDL8OhdNMdjGbkZZ7L_E_lo0jTMXqYs84pTdwPeagjEdod5xyh6wkT0q8RRvLk6qi0alXJGEOrS_awLBI3y68puReeY7ihzLhoQfJFqcEZwwP-xlAs5v7d7P7hYT6bT2_FwsMKw8Bf3Ir726lYTOd3wVSIxcnDP43A7PQXdltMKA?type=png)](https://mermaid.live/edit#pako:eNp9k01v2zAMhv8Ky1MLOEYiJ_0w0BXLBmyXnrJTYWBgbCbxakuGJDfzkvz3yV9D3TjTQYBI-n34ivIBY5UwhrjJ1D7ekbbwYxlJcMuU662mYgefpSSYtcF6rWMy9mecpSztu3DBrPsoTCYTODo9KTk7tinD-o119wHLJJIfOEu1XlcgxkFiFCQug8Rl0BfSOUsIxknBKCm4TArOSIMbgsfHT3CMcGXd7bb5b1qVBTybbQht4LvaQ2qAnVqlJD9dRXiEVZtr92Er_qSRhOvWyk1XtOPKA9cgeV3gV2ks7ElaTsAqMK7HLkNQ6PSNLEPOxtCWfd93gmOzOvckek9LrSipE-G_BoCy7Oo9fk3xK2y0ynsnGVWp3IJlKVPTYBuvZz5nrc-ac12_wRtQu95YKeOMHU7q6qmTOJ9Iu68OET5TKvtjUxHhqSeuajMDL8OhdNMdjGbkZZ7L_E_lo0jTMXqYs84pTdwPeagjEdod5xyh6wkT0q8RRvLk6qi0alXJGEOrS_awLBI3y68puReeY7ihzLhoQfJFqcEZwwP-xlAs5v7d7P7hYT6bT2_FwsMKw8Bf3Ir726lYTOd3wVSIxcnDP43A7PQXdltMKA)
+-->
+
+### Architecture 
+
+<p align="center">
+  <img src='images/arch.png' width='920' height='346'/>
+</p>
+
 
 --Bibek
